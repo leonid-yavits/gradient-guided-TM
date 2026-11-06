@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/TreeTM_datasets/
+data/bin/
+fptm/FuzzyPatternTM/
+results/**/*.log
+*.zip
+.DS_Store
