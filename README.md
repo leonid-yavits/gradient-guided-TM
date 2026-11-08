@@ -50,6 +50,7 @@ tests/check_reproduction.py  bit-exact check of three stored runs
 ## Installation
 
 ```bash
+git clone https://github.com/leonid-yavits/gradient-guided-TM.git && cd gradient-guided-TM
 python -m pip install -r requirements.txt   # tested with Python 3.13, NumPy 2.5, SciPy 1.18, Matplotlib 3.11
 ```
 
@@ -102,7 +103,7 @@ python train.py --dataset wos --readout gg_hidtern --clauses 200 --s 10 --lr 3e-
 @unpublished{yavits2026ggth,
   title  = {Gradient-Guided {T}setlin Machines with a Ternary Hidden Readout for Many-Class Classification under Tight Clause Budgets},
   author = {Yavits, Leonid},
-  note   = {Submitted to Expert Systems with Applications},
+  note   = {Submitted to Expert Systems with Applications. Code: https://github.com/leonid-yavits/gradient-guided-TM},
   year   = {2026}
 }
 ```

@@ -20,6 +20,6 @@ Alternatively, set `GGTH_DATA=/path/to/TreeTM_datasets`.
 - **WOS:** Web of Science WOS-46985 (Kowsari et al., ICMLA 2017). Mendeley Data, DOI 10.17632/9rw3vkcfy4.6, CC BY 4.0.
 - **ALeRCE:** light-curve classifier labeled set (Sánchez-Sáez et al., AJ 2021). Zenodo, DOI 10.5281/zenodo.4279623.
 
-**Download:** TODO (authors). Add the download location of `TreeTM_datasets.zip`. This can be a release asset of this repository, a Zenodo record, or the TreeTM repository.
+**Download:** TODO (authors). Add the download location of `TreeTM_datasets.zip`. This can be a release asset of https://github.com/leonid-yavits/gradient-guided-TM, a Zenodo record, or the TreeTM repository.
 
 `fptm/export_bin.py` writes the raw binaries for the FPTM driver to `data/bin/`. These are not tracked by git.
