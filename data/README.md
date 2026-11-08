@@ -18,8 +18,15 @@ Alternatively, set `GGTH_DATA=/path/to/TreeTM_datasets`.
 
 **Sources:**
 - **WOS:** Web of Science WOS-46985 (Kowsari et al., ICMLA 2017). Mendeley Data, DOI 10.17632/9rw3vkcfy4.6, CC BY 4.0.
-- **ALeRCE:** light-curve classifier labeled set (Sánchez-Sáez et al., AJ 2021). Zenodo, DOI 10.5281/zenodo.4279623.
+- **ALeRCE:** light-curve classifier labeled set (Sánchez-Sáez et al., AJ 2021). Zenodo, DOI 10.5281/zenodo.4279623, CC BY 4.0.
 
-**Download:** TODO (authors). Add the download location of `TreeTM_datasets.zip`. This can be a release asset of https://github.com/leonid-yavits/gradient-guided-TM, a Zenodo record, or the TreeTM repository.
+**Download:** the prepared splits are a release asset of this repository (both datasets are CC BY 4.0, redistributed with attribution):
+
+```bash
+curl -L -o gg-th_datasets.zip https://github.com/leonid-yavits/gradient-guided-TM/releases/download/data-v1/gg-th_datasets.zip
+unzip gg-th_datasets.zip -d data/      # creates data/TreeTM_datasets/{wos,alerce}
+```
+
+SHA-256 of `gg-th_datasets.zip`: `2fced0055421d2f8f62b283858d035420d51f990de3d67234027b0efecc40182`. Per-file checksums are in `TreeTM_datasets/SHA256SUMS`.
 
 `fptm/export_bin.py` writes the raw binaries for the FPTM driver to `data/bin/`. These are not tracked by git.

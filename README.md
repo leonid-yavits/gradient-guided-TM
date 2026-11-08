@@ -69,7 +69,7 @@ The experiments use the prepared TreeTM splits of two public datasets:
 - **WOS:** Web of Science WOS-46985, Kowsari *et al.*, ICMLA 2017, Mendeley Data, DOI 10.17632/9rw3vkcfy4.6.
 - **ALeRCE:** the ALeRCE light-curve classifier labeled set, Sánchez-Sáez *et al.*, AJ 2021, Zenodo, DOI 10.5281/zenodo.4279623.
 
-See [`data/README.md`](data/README.md) for how to obtain them. Place them as `data/TreeTM_datasets/{wos,alerce}/{prepared.npz,meta.json}`, or point `GGTH_DATA` to their location.
+Download them from the [`data-v1` release](https://github.com/leonid-yavits/gradient-guided-TM/releases/tag/data-v1) (`gg-th_datasets.zip`, CC BY 4.0) and unzip into `data/`. See [`data/README.md`](data/README.md). Place them as `data/TreeTM_datasets/{wos,alerce}/{prepared.npz,meta.json}`, or point `GGTH_DATA` to their location.
 
 ## Reproducing the paper
 
