@@ -1,6 +1,7 @@
 # Driver for the unmodified FPTM reference implementation (BooBSD/FuzzyPatternTM, commit e25a51e).
 # Same Booleanized arrays, class-balanced sampling and metrics as tmexp.py. No model selection on test.
-# Usage: julia -t 1 fptm_run.jl <dataset> <clauses_per_class> <T> <S> <L> <LF> <epochs> <P> <seed> <out.json>
+# Usage: julia -t 1 fptm_run.jl <dataset> <clauses_per_class> <T> <S> <L> <LF> <epochs> <P> <seed> <out.json> [patience]
+# patience > 0: stop after that many epochs without a validation macro F1 gain.
 # Path to FuzzyPatternTM.jl from https://github.com/BooBSD/FuzzyPatternTM at commit e25a51e (set FPTM_SRC).
 include(get(ENV, "FPTM_SRC", joinpath(@__DIR__, "FuzzyPatternTM", "src", "FuzzyPatternTM.jl")))
 using .FuzzyPatternTM: TMInput, TMClassifier, train!, predict, initialize!
@@ -9,6 +10,7 @@ using Random, Printf
 ds = ARGS[1]
 cpc, T, S, L, LF, epochs, P, seed = parse.(Int, ARGS[2:9])
 out = ARGS[10]
+patience = length(ARGS) >= 11 ? parse(Int, ARGS[11]) : 0
 Random.seed!(seed)
 const BIN = get(ENV, "GGTH_BIN", joinpath(@__DIR__, "..", "data", "bin"))   # written by fptm/export_bin.py
 info = read("$BIN/$ds.json", String)
@@ -63,13 +65,18 @@ end
 tm = TMClassifier{Int64}(cpc, T, S, L=L, LF=LF, states_num=256, include_limit=200)
 initialize!(tm, Xtr, ytr)
 recs = String[]
+best_f1, best_ep = -1.0, 0
 for ep in 1:epochs
+    (patience > 0 && ep - 1 - best_ep >= patience) && break
     idx = P > 0 ? balanced(ytr, P, m) : randperm(length(ytr))
     t = @elapsed train!(tm, Xtr[idx], ytr[idx], shuffle=true)
     r = @sprintf("{\"epoch\": %d, \"sec\": %.2f, \"mean_literals\": %.2f", ep, t, mean_literals(tm))
     for (s, X, y) in (("val", Xva, yva), ("test", Xte, yte))
         a, ba, f = metrics(y, predict(tm, X))
         r *= @sprintf(", \"%s_acc\": %.6f, \"%s_bacc\": %.6f, \"%s_f1\": %.6f", s, a, s, ba, s, f)
+        if s == "val" && f > best_f1
+            global best_f1, best_ep = f, ep
+        end
     end
     r *= "}"
     println(r); flush(stdout)
@@ -77,4 +84,7 @@ for ep in 1:epochs
     open(out, "w") do f
         write(f, "{\"args\": {\"dataset\": \"$ds\", \"clauses_per_class\": $cpc, \"T\": $T, \"S\": $S, \"L\": $L, \"LF\": $LF, \"P\": $P, \"seed\": $seed}, \"epochs\": [" * join(recs, ", ") * "]}")
     end
+end
+open(out, "w") do f
+    write(f, "{\"args\": {\"dataset\": \"$ds\", \"clauses_per_class\": $cpc, \"T\": $T, \"S\": $S, \"L\": $L, \"LF\": $LF, \"P\": $P, \"seed\": $seed, \"patience\": $patience}, \"epochs\": [" * join(recs, ", ") * "], \"best_epoch\": $best_ep, \"done\": true}")
 end

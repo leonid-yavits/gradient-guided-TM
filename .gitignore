@@ -6,3 +6,7 @@ fptm/FuzzyPatternTM/
 results/**/*.log
 *.zip
 .DS_Store
+results_es/
+es_run.log
+*.ckpt
+*.ckpt.tmp

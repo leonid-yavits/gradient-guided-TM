@@ -3,6 +3,8 @@
 Readouts
   cotm       : Coalesced TM update (Glimsdal and Granmo, arXiv:2108.07594), integer weights.
   gg_lin     : gradient-guided (GG) TA feedback with a real-valued linear readout trained by Adam.
+  gg_lintern : GG feedback with a ternary linear readout (weights in {-1,0,+1}, straight-through
+               estimator, learned scale). Each clause votes directly for the classes.
   gg_hidtern : GG feedback with a ternary hidden layer (ternary weights and activations)
                and a ternary output layer. This is the GG-TH model of the paper.
 
@@ -119,13 +121,18 @@ class GGReadout:
     """Differentiable readout trained by Adam. Its clause gradients drive GG feedback."""
 
     def __init__(self, kind, n, m, rng, H=256, lr=2e-3):
-        assert kind in ('gg_lin', 'gg_hidtern'), kind
+        assert kind in ('gg_lin', 'gg_lintern', 'gg_hidtern'), kind
         self.kind, self.n, self.m, self.H, self.rng = kind, n, m, H, rng
         sc = 1.0 / np.sqrt(n)
         if kind == 'gg_lin':
             self.W = (rng.standard_normal((m, n)) * sc).astype(np.float32)
             self.b = np.zeros(m, np.float32)
             params = [self.W, self.b]
+        elif kind == 'gg_lintern':
+            self.W = (rng.standard_normal((m, n)) * sc).astype(np.float32)
+            self.b = np.zeros(m, np.float32)
+            self.a = np.array([4.0 / np.sqrt(n)], np.float32)       # logit scale
+            params = [self.W, self.b, self.a]
         else:
             self.W1 = (rng.standard_normal((H, n)) * sc).astype(np.float32)
             self.b1 = np.zeros(H, np.float32)
@@ -139,6 +146,10 @@ class GGReadout:
     def forward(self, c):
         if self.kind == 'gg_lin':
             return c @ self.W.T + self.b, None
+        if self.kind == 'gg_lintern':
+            Wt = ternarize(self.W)
+            v = c @ Wt.T                                            # integer signed votes
+            return self.a[0] * v + self.b, (Wt, v)
         W1t, W2t = ternarize(self.W1), ternarize(self.W2)
         pre = c @ W1t.T                                             # integer signed popcount
         a = self.a1[0] * pre + self.b1
@@ -148,6 +159,12 @@ class GGReadout:
 
     def scores(self, c):
         return self.forward(c)[0]
+
+    def scores_rounded(self, c):
+        """gg_lin only: post-hoc ternary rounding of the trained weights, W ~ alpha * ternarize(W)."""
+        Wt = ternarize(self.W)
+        alpha = np.abs(self.W[Wt != 0]).mean() if np.any(Wt) else 1.0
+        return alpha * (c @ Wt.T) + self.b
 
     def train_step(self, c, y):
         B = c.shape[0]
@@ -161,6 +178,14 @@ class GGReadout:
             gb = dz.sum(0)
             dc = dz @ self.W
             self.opt.step([gW, gb])
+        elif self.kind == 'gg_lintern':
+            Wt, v = cache
+            gW = self.a[0] * (dz.T @ c)                             # straight-through to latent W
+            gb = dz.sum(0)
+            ga = np.array([np.sum(dz * v)], np.float32)
+            dc = self.a[0] * (dz @ Wt)
+            self.opt.step([gW, gb, ga])
+            self.a[0] = max(self.a[0], 1e-4)
         else:
             W1t, W2t, pre, a, h = cache
             hw = h @ W2t.T
