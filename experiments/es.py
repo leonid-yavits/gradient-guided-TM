@@ -29,11 +29,11 @@ FINAL = dict(epochs=60, patience=10)
 ORDER = (1000, 200, 500, 2000, 100, 50)      # final budgets, most informative first
 
 GRIDS = {
-    # Grids extended where the first WOS-1000 optima fell on the boundary (s=40, s=2, lr=1e-4).
-    'gg_hidtern': [dict(s=s, lr=lr, H=H) for s, lr, H in itertools.product((5, 10, 20, 40), (1e-3, 3e-3), (128, 256))],
-    'gg_lintern': [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((2, 5, 10, 20), (1e-3, 3e-3, 1e-2))],
+    # Grids extended twice where the 1000-clause optima fell on the boundary.
+    'gg_hidtern': [dict(s=s, lr=lr, H=H) for s, lr, H in itertools.product((2, 5, 10, 20, 40), (1e-3, 3e-3), (128, 256))],
+    'gg_lintern': [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((1.5, 2, 5, 10, 20), (1e-3, 3e-3, 1e-2))],
     'tnn':        [dict(s=0, lr=lr, H=H) for lr, H in itertools.product((1e-4, 3e-4, 1e-3, 3e-3, 1e-2), (128, 256))],
-    'cotm':       [dict(s=s, Tm=t, H=0) for s, t in itertools.product((2, 5, 10, 20), (0.1, 0.3, 1.0, 2.5))],
+    'cotm':       [dict(s=s, Tm=t, H=0) for s, t in itertools.product((1.5, 2, 5, 10, 20), (0.1, 0.3, 1.0, 2.5, 5.0))],
 }
 MODELS = tuple(GRIDS)
 
