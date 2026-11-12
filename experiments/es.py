@@ -15,6 +15,7 @@ Runs are checkpointed every epoch and resumed after an interruption; completed r
 import argparse
 import itertools
 import json
+import math
 import os
 import subprocess
 import sys
@@ -31,7 +32,7 @@ ORDER = (1000, 200, 500, 2000, 100, 50)      # final budgets, most informative f
 GRIDS = {
     # Grids extended where tuning optima fell on the boundary. All clause models share the s range 1.5 to 20 (40).
     'gg_hidtern': [dict(s=s, lr=lr, H=H) for s, lr, H in itertools.product((1.5, 2, 5, 10, 20, 40), (1e-3, 3e-3), (128, 256))],
-    'gg_lintern': [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((1.5, 2, 5, 10, 20), (3e-4, 1e-3, 3e-3, 1e-2, 3e-2))],
+    'gg_lintern': [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((1.5, 2, 5, 10, 20), (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2))],
     'tnn':        [dict(s=0, lr=lr, H=H) for lr, H in itertools.product((3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2), (128, 256))],
     'cotm':       [dict(s=s, Tm=t, H=0) for s, t in itertools.product((1.5, 2, 5, 10, 20), (0.03, 0.1, 0.3, 1.0, 2.5, 5.0, 10.0, 20.0))],
 }
@@ -66,8 +67,35 @@ def best_cfg(model, ds, n):
     return max(GRIDS[model], key=lambda c: best_val(ofile('tune', model, ds, a, c, 1)))
 
 
+# FPTM: base grid of config.py, then one step beyond the base grid along every axis on which the base optimum
+# lies at the grid boundary (other axes held at the base optimum).
+FPTM_EXT = dict(tm={1: 0.5, 2: 3}, S={100: 50, 1000: 2000}, L={(8, 4): (4, 2)})
+
+
+def fptm_T(c, LF, tm):
+    return max(2, round(tm * math.sqrt(c / 2 * LF)))
+
+
+def fptm_cands(ds, n):
+    c = C.cpc(ds, n)
+    base = C.fptm_grid(c)
+    if not all(finished(ffile('tune', ds, n, g, 1)) for g in base):
+        return base
+    b = max(base, key=lambda g: best_val(ffile('tune', ds, n, g, 1)))
+    tm = next(t for t in (1, 2) if fptm_T(c, b['LF'], t) == b['T'])
+    ext = []
+    if tm in FPTM_EXT['tm']:
+        ext.append(dict(b, T=fptm_T(c, b['LF'], FPTM_EXT['tm'][tm])))
+    if b['S'] in FPTM_EXT['S']:
+        ext.append(dict(b, S=FPTM_EXT['S'][b['S']]))
+    if (b['L'], b['LF']) in FPTM_EXT['L']:
+        L, LF = FPTM_EXT['L'][(b['L'], b['LF'])]
+        ext.append(dict(b, L=L, LF=LF, T=fptm_T(c, LF, tm)))
+    return base + [e for e in ext if e not in base]
+
+
 def fptm_best(ds, n):
-    return max(C.fptm_grid(C.cpc(ds, n)), key=lambda c: best_val(ffile('tune', ds, n, c, 1)))
+    return max(fptm_cands(ds, n), key=lambda c: best_val(ffile('tune', ds, n, c, 1)))
 
 
 def ours_job(phase, model, ds, n, cfg, seed, readout=None):
@@ -104,7 +132,7 @@ def tune_jobs():
                 jobs += [ours_job('tune', model, ds, a, c, 1) for c in GRIDS[model]]
     for ds in C.DS:
         for n in C.fptm_sizes(ds):
-            jobs += [fptm_job('tune', ds, n, c, 1) for c in C.fptm_grid(C.cpc(ds, n))]
+            jobs += [fptm_job('tune', ds, n, c, 1) for c in fptm_cands(ds, n)]
     return [j for j in jobs if j]
 
 
