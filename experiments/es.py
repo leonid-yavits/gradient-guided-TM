@@ -9,7 +9,9 @@ Protocol
          FPTM is tuned at every distinct size.
   final: seeds 1 to 3, up to 60 epochs, patience 10; test metrics are read at the best validation epoch.
 
-  python experiments/es.py tune|final|all [--workers 2] [--dry]
+  ext  : rerun, with up to 120 epochs, every final setting with a seed whose best epoch fell near the cap.
+
+  python experiments/es.py tune|final|ext|all [--workers 2] [--dry]
 Runs are checkpointed every epoch and resumed after an interruption; completed runs are skipped.
 """
 import argparse
@@ -27,6 +29,7 @@ import config as C
 RES = os.path.join(C.ROOT, 'results_es')
 TUNE = dict(epochs=20, patience=5)
 FINAL = dict(epochs=60, patience=10)
+EXT = dict(epochs=120, patience=10)            # rerun of final settings whose best epoch fell near the 60-epoch cap
 ORDER = (1000, 200, 500, 2000, 100, 50)      # final budgets, most informative first
 
 GRIDS = {
@@ -102,7 +105,7 @@ def ours_job(phase, model, ds, n, cfg, seed, readout=None):
     out = ofile(phase, model, ds, n, cfg, seed)
     if finished(out):
         return None
-    P = TUNE if phase == 'tune' else FINAL
+    P = {'tune': TUNE, 'final': FINAL, 'ext': EXT}[phase]
     cmd = [sys.executable, os.path.join(C.ROOT, 'train.py'), '--dataset', ds, '--readout', readout or model,
            '--clauses', str(n), '--lr', str(cfg.get('lr', 2e-3)), '--H', str(cfg['H'] or 256),
            '--P', str(C.PCLS[ds]), '--epochs', str(P['epochs']), '--patience', str(P['patience']),
@@ -118,7 +121,7 @@ def fptm_job(phase, ds, n, cfg, seed):
     out = ffile(phase, ds, n, cfg, seed)
     if finished(out):
         return None
-    P = TUNE if phase == 'tune' else FINAL
+    P = {'tune': TUNE, 'final': FINAL, 'ext': EXT}[phase]
     jl = [os.environ.get('JULIA', 'julia'), '-t', '1', os.path.join(C.ROOT, 'fptm', 'fptm_run.jl')]
     return jl + [ds, str(C.cpc(ds, n)), str(cfg['T']), str(cfg['S']), str(cfg['L']), str(cfg['LF']),
                  str(P['epochs']), str(C.PCLS[ds]), str(seed), out, str(P['patience'])], out
@@ -136,20 +139,34 @@ def tune_jobs():
     return [j for j in jobs if j]
 
 
-def final_jobs():
+def final_jobs(phase='final'):
+    """phase 'final': every selected setting. phase 'ext': only settings with at least one final seed whose best
+    epoch fell near the 60-epoch cap; all seeds of such a setting are rerun from scratch with up to 120 epochs."""
+    def keep(paths):
+        return phase == 'final' or any(near_cap(p) for p in paths)
+
     jobs = []
     for n in ORDER:
         for ds in C.DS:
             for model in MODELS:
                 c = best_cfg(model, ds, n)
-                jobs += [ours_job('final', model, ds, n, c, s) for s in C.SEEDS]
+                if keep([ofile('final', model, ds, n, c, s) for s in C.SEEDS]):
+                    jobs += [ours_job(phase, model, ds, n, c, s) for s in C.SEEDS]
             if n == 1000:                         # GG-linear with post-hoc rounding, setting of gg_lintern
                 c = dict(best_cfg('gg_lintern', ds, n))
-                jobs += [ours_job('final', 'gg_lin', ds, n, c, s, readout='gg_lin') for s in C.SEEDS]
+                if keep([ofile('final', 'gg_lin', ds, n, c, s) for s in C.SEEDS]):
+                    jobs += [ours_job(phase, 'gg_lin', ds, n, c, s, readout='gg_lin') for s in C.SEEDS]
             if n in C.fptm_sizes(ds):
                 c = fptm_best(ds, n)
-                jobs += [fptm_job('final', ds, n, c, s) for s in C.SEEDS]
+                if keep([ffile('final', ds, n, c, s) for s in C.SEEDS]):
+                    jobs += [fptm_job(phase, ds, n, c, s) for s in C.SEEDS]
     return [j for j in jobs if j]
+
+
+def near_cap(path):
+    """Final run whose best epoch lies within the last patience/2 epochs of the 60-epoch cap."""
+    d = json.load(open(path))
+    return len(d['epochs']) >= FINAL['epochs'] and d['best_epoch'] > FINAL['epochs'] - FINAL['patience'] // 2
 
 
 def execute(jobs, workers, dry):
@@ -174,9 +191,9 @@ def execute(jobs, workers, dry):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('phase', choices=['tune', 'final', 'all'])
+    ap.add_argument('phase', choices=['tune', 'final', 'ext', 'all'])
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--dry', action='store_true')
     a = ap.parse_args()
     for ph in (('tune', 'final') if a.phase == 'all' else (a.phase,)):
-        execute(tune_jobs() if ph == 'tune' else final_jobs(), a.workers, a.dry)
+        execute(tune_jobs() if ph == 'tune' else final_jobs(ph), a.workers, a.dry)
