@@ -43,7 +43,8 @@ def at_best(path):
     if not d.get('done'):
         return None
     e = {r['epoch']: r for r in d['epochs']}[d['best_epoch']]
-    return dict(e, best_epoch=d['best_epoch'], n_epochs=len(d['epochs']))
+    cap = es.EXT['epochs'] if '/ext_' in path else es.FINAL['epochs'] if '/final_' in path else es.TUNE['epochs']
+    return dict(e, best_epoch=d['best_epoch'], n_epochs=len(d['epochs']), cap=cap)
 
 
 def ms(runs, key):
@@ -77,25 +78,40 @@ BUD = C.BUDGETS if PH == 'final' else (200, 1000)
 
 # ------------------------------------------------------------------ collect
 rows = {}                                          # (ds, model) -> list of dicts per budget
+EXTENDED = []                                      # (ds, model, n, 60-epoch runs, 120-epoch runs)
+
+
+def load(path):
+    """Runs of one setting over the seeds. path(phase, seed) gives the log file. In the final phase a setting
+    rerun with up to 120 epochs (es.py ext) replaces its 60-epoch runs once all its seeds are done."""
+    r = [x for x in (at_best(path(PH, s)) for s in SEEDS) if x]
+    if PH == 'final':
+        e = [at_best(path('ext', s)) for s in SEEDS]
+        if all(e):
+            return e, r
+    return r, None
+
+
+def add(ds, model, n, clauses, c, path, bits):
+    r, r60 = load(path)
+    if r:
+        rows.setdefault((ds, model), []).append(dict(n=n, clauses=clauses, cfg=c, r=r, bits=bits))
+        if r60:
+            EXTENDED.append((ds, model, n, r60, r))
+
+
 for ds in C.DS:
     for n in BUD:
+        nn = n if PH == 'final' else C.anchor(n)
         for model in es.MODELS:
             c = es.best_cfg(model, ds, n)
-            nn = n if PH == 'final' else C.anchor(n)
-            r = [x for x in (at_best(es.ofile(PH, model, ds, nn, c, s)) for s in SEEDS) if x]
-            if r:
-                rows.setdefault((ds, model), []).append(dict(n=n, clauses=n, cfg=c, r=r, bits=dense_bits(model, ds, n, c)))
+            add(ds, model, n, n, c, lambda ph, s: es.ofile(ph, model, ds, nn, c, s), dense_bits(model, ds, n, c))
         if n == 1000:
             c = dict(es.best_cfg('gg_lintern', ds, n))
-            r = [x for x in (at_best(es.ofile(PH, 'gg_lin', ds, n, c, s)) for s in SEEDS) if x]
-            if r:
-                rows.setdefault((ds, 'gg_lin'), []).append(dict(n=n, clauses=n, cfg=c, r=r, bits=dense_bits('gg_lin', ds, n, c)))
+            add(ds, 'gg_lin', n, n, c, lambda ph, s: es.ofile(ph, 'gg_lin', ds, n, c, s), dense_bits('gg_lin', ds, n, c))
         if n in C.fptm_sizes(ds):
             c, cp = es.fptm_best(ds, n), C.cpc(ds, n)
-            r = [x for x in (at_best(es.ffile(PH, ds, n, c, s)) for s in SEEDS) if x]
-            if r:
-                rows.setdefault((ds, 'fptm'), []).append(dict(n=n, clauses=cp * C.M[ds], cfg=c, r=r,
-                                                             bits=2 * C.O[ds] * cp * C.M[ds]))
+            add(ds, 'fptm', n, cp * C.M[ds], c, lambda ph, s: es.ffile(ph, ds, n, c, s), 2 * C.O[ds] * cp * C.M[ds])
 for v in rows.values():
     for x in v:
         x['lit'] = np.mean([q['mean_literals'] for q in x['r']])
@@ -174,10 +190,21 @@ for ds in C.DS:
                 L.append(f'| {ds} | {n} | {LABEL[m]} | {x["lit"]:.1f} | {x["bits"]:,} | {x["ep"]:.1f} |')
 
 # Convergence: runs that stopped at the epoch cap
-cap = es.FINAL['epochs'] if PH == 'final' else es.TUNE['epochs']
-hit = [(ds, m, x['n']) for (ds, m), v in rows.items() for x in v for q in x['r'] if q['n_epochs'] >= cap and q['best_epoch'] > cap - es.FINAL['patience'] // 2]
+hit = [(ds, m, x['n']) for (ds, m), v in rows.items() for x in v for q in x['r']
+       if q['n_epochs'] >= q['cap'] and q['best_epoch'] > q['cap'] - es.FINAL['patience'] // 2]
+cap = '60 or 120' if EXTENDED else (es.FINAL['epochs'] if PH == 'final' else es.TUNE['epochs'])
 L += ['', f'Runs whose best epoch lies within the last {es.FINAL["patience"] // 2} epochs of the cap ({cap}): {len(hit)}.']
 L += [f'- {ds} {LABEL[m]} n={n}' for ds, m, n in sorted(set(hit))]
+if EXTENDED:
+    L += ['', f'## Settings rerun with up to {es.EXT["epochs"]} epochs', '',
+          'All seeds of every final setting with at least one seed whose best epoch fell within the last '
+          f'{es.FINAL["patience"] // 2} epochs of the {es.FINAL["epochs"]}-epoch cap were rerun from scratch with up to '
+          f'{es.EXT["epochs"]} epochs and the same patience. The tables above use the rerun.', '',
+          '| Dataset | Budget | Model | Macro F1, 60-epoch cap | Macro F1, 120-epoch cap | Best epochs (120-epoch cap) |',
+          '|---|---|---|---|---|---|']
+    for ds, m, n, r60, r in EXTENDED:
+        f = lambda rr: f'{ms(rr, "test_f1")[0]:.2f} ± {ms(rr, "test_f1")[1]:.2f}'
+        L.append(f'| {ds} | {n} | {LABEL[m]} | {f(r60)} | {f(r)} | {", ".join(str(q["best_epoch"]) for q in r)} |')
 
 out_md = os.path.join(es.RES, 'summary.md' if PH == 'final' else 'summary_tune.md')
 open(out_md, 'w').write('\n'.join(L) + '\n')
