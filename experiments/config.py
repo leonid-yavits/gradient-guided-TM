@@ -10,10 +10,11 @@ R_ABL = os.path.join(RES, 'ablation')
 R_OURS = os.path.join(RES, 'budget', 'ours')
 R_FPTM = os.path.join(RES, 'budget', 'fptm')
 
-DS = ('wos', 'alerce')
-M = {'wos': 133, 'alerce': 15}             # classes
-O = {'wos': 2000, 'alerce': 1172}          # Boolean features (2*O literals)
-PCLS = {'wos': 300, 'alerce': 4000}        # samples per class per epoch
+DS = ('wos', 'alerce')                                         # original study (experiments/run.py)
+DS_ES = DS + ('r52', 'sector', 'rcv1', 'news20')               # early-stopping study; the last four: experiments/PROTOCOL_text.md
+M = {'wos': 133, 'alerce': 15, 'r52': 52, 'sector': 105, 'rcv1': 51, 'news20': 20}            # classes
+O = {'wos': 2000, 'alerce': 1172, 'r52': 2000, 'sector': 2000, 'rcv1': 2000, 'news20': 2000}  # Boolean features
+PCLS = {'wos': 300, 'alerce': 4000, 'r52': 100, 'sector': 50, 'rcv1': 300, 'news20': 700}     # samples per class per epoch
 BUDGETS = (50, 100, 200, 500, 1000, 2000)  # total clauses
 SEEDS = (1, 2, 3)
 TUNE_EPOCHS, FINAL_EPOCHS = 5, 20

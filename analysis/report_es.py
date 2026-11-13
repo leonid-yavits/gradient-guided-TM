@@ -100,7 +100,7 @@ def add(ds, model, n, clauses, c, path, bits):
             EXTENDED.append((ds, model, n, r60, r))
 
 
-for ds in C.DS:
+for ds in C.DS_ES:
     for n in BUD:
         nn = n if PH == 'final' else C.anchor(n)
         for model in es.MODELS:
@@ -148,13 +148,13 @@ for m in es.MODELS:
 L.append(f'| FPTM | {len(C.fptm_grid(10))} per size | (L, LF), S, T multiplier |')
 L += ['', '| Model | Dataset | Anchor | Best setting | Validation F1 |', '|---|---|---|---|---|']
 for m in es.MODELS:
-    for ds in C.DS:
+    for ds in C.DS_ES:
         for a in (1000, 200):
             c = es.best_cfg(m, ds, a)
             L.append(f'| {LABEL[m]} | {ds} | {a} | {es.tag(c)} | {es.best_val(es.ofile("tune", m, ds, a, c, 1)) * 100:.2f} |')
 
 for key, title in (('test_f1', 'Macro F1'), ('test_bacc', 'Balanced accuracy'), ('test_acc', 'Accuracy')):
-    for ds in C.DS:
+    for ds in C.DS_ES:
         L += ['', f'## {title}, {NAME[ds]}', '',
               '| Budget | ' + ' | '.join(LABEL[m] for m in es.MODELS) + ' | FPTM |',
               '|---' * (len(es.MODELS) + 2) + '|']
@@ -169,7 +169,7 @@ for key, title in (('test_f1', 'Macro F1'), ('test_bacc', 'Balanced accuracy'), 
 L += ['', '## GG-linear trained in floating point, evaluated with weights rounded to {-1, 0, +1} (n = 1000)', '',
       '| Dataset | GG-linear float F1 | GG-linear rounded F1 | GG, ternary readout (STE) F1 | GG-TH F1 |',
       '|---|---|---|---|---|']
-for ds in C.DS:
+for ds in C.DS_ES:
     x = get(ds, 'gg_lin', 1000)
     if x is None:
         continue
@@ -182,7 +182,7 @@ L += ['', '## Sparsity and memory', '',
       'Literals: mean included literals per clause (clause models) or mean nonzero first-layer weights per unit '
       '(ternary net), at the best epoch. Bits: stored bits of the clause or first layer plus ternary readout layers.', '',
       '| Dataset | Budget | Model | Literals per clause or unit | Bits | Best epoch (mean) |', '|---|---|---|---|---|---|']
-for ds in C.DS:
+for ds in C.DS_ES:
     for n in BUD:
         for m in es.MODELS + ('fptm',):
             x = get(ds, m, n)
@@ -213,7 +213,7 @@ print('wrote', out_md)
 # ------------------------------------------------------------------ figure: macro F1 against clause budget
 fig = plt.figure(figsize=(10, 4.6))
 gs = GridSpec(2, 2, height_ratios=[1, 0.12], hspace=0.38, wspace=0.22)
-for i, ds in enumerate(C.DS):
+for i, ds in enumerate(C.DS_ES):
     ax = fig.add_subplot(gs[0, i])
     for m in es.MODELS + ('fptm',):
         v = rows.get((ds, m), [])

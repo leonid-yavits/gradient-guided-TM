@@ -130,10 +130,10 @@ def fptm_job(phase, ds, n, cfg, seed):
 def tune_jobs():
     jobs = []
     for a in (1000, 200):
-        for ds in C.DS:
+        for ds in C.DS_ES:
             for model in MODELS:
                 jobs += [ours_job('tune', model, ds, a, c, 1) for c in GRIDS[model]]
-    for ds in C.DS:
+    for ds in C.DS_ES:
         for n in C.fptm_sizes(ds):
             jobs += [fptm_job('tune', ds, n, c, 1) for c in fptm_cands(ds, n)]
     return [j for j in jobs if j]
@@ -147,7 +147,7 @@ def final_jobs(phase='final'):
 
     jobs = []
     for n in ORDER:
-        for ds in C.DS:
+        for ds in C.DS_ES:
             for model in MODELS:
                 c = best_cfg(model, ds, n)
                 if keep([ofile('final', model, ds, n, c, s) for s in C.SEEDS]):
