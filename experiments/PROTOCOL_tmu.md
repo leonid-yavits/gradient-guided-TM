@@ -42,3 +42,10 @@ samples per class per epoch (`C.PCLS`), test metrics read at the best validation
   the multiclass TM against GG with a ternary linear readout, GG-TH and our CoTM.
 * If our CoTM is significantly below TMU CoTM at a checked budget, this is stated in the paper, and the CoTM
   comparison is qualified accordingly.
+
+## Amendment, 14 Nov 2026 (before any accuracy result was read)
+
+A WOS check run takes about 2 hours, the time limit of one background job here. Runs are therefore checkpointed after
+every epoch (pickled TMU model, sampler state and log) and resumed after an interruption. A resumed run is not
+bit-identical to an uninterrupted one, because the TMU C code keeps its own random state. Resumed runs list the
+epochs after which they resumed in the field `resumed_after` of their log.

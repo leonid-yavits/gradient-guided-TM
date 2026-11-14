@@ -88,7 +88,16 @@ def one(model, ds, n, s, Tm, seed, epochs, patience, out):
     log = dict(model=model, dataset=ds, clauses=n, total_clauses=total, s=s, Tm=Tm, T=T, seed=seed,
                epochs=[], done=False, library=TMU_VERSION)
     best, bad = -1.0, 0
-    for ep in range(1, epochs + 1):
+    import pickle
+    ck = out + '.ckpt'
+    if os.path.exists(ck):                                 # resume after an interruption (not bit-identical:
+        with open(ck, 'rb') as f:                          # the TMU C code keeps its own random state)
+            tm, rng, log, best, bad, gst = pickle.load(f)
+        np.random.set_state(gst)
+        log['resumed_after'] = log.get('resumed_after', []) + [len(log['epochs'])]
+    for ep in range(len(log['epochs']) + 1, epochs + 1):
+        if bad >= patience:
+            break
         t0 = time.time()
         idx = balanced_perm(ytr, C.PCLS[ds], m, rng)
         tm.fit(Xtr[idx], ytr[idx].astype(np.uint32), shuffle=False)
@@ -103,10 +112,13 @@ def one(model, ds, n, s, Tm, seed, epochs, patience, out):
         else:
             bad += 1
         json.dump(log, open(out, 'w'))
-        if bad >= patience:
-            break
+        with open(ck + '.tmp', 'wb') as f:
+            pickle.dump((tm, rng, log, best, bad, np.random.get_state()), f)
+        os.replace(ck + '.tmp', ck)
     log['done'] = True
     json.dump(log, open(out, 'w'))
+    if os.path.exists(ck):
+        os.remove(ck)
 
 
 def literals(tm, model, m):
@@ -158,8 +170,6 @@ def execute(jobs, workers, dry):
     def run(j):
         cmd, out = j
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        if os.path.exists(out):
-            os.remove(out)                                 # no checkpoints in TMU: restart unfinished runs
         with open(out.replace('.json', '.log'), 'a') as f:
             return out, subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
 
