@@ -10,3 +10,4 @@ results_es/
 es_run.log
 *.ckpt
 *.ckpt.tmp
+results_tmu/
