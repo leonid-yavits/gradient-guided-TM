@@ -36,10 +36,15 @@ DSN = {'wos': 'WOS', 'alerce': 'ALeRCE', 'r52': 'R52', 'sector': 'Sector', 'rcv1
 NAME = {'gg_lintern': 'GG-TL', 'gg_hidtern': 'GG-TH', 'cotm': 'CoTM', 'tmu_tm': 'TM', 'fptm': 'FPTM', 'tnn': 'TNN'}
 COLS = ('gg_lintern', 'gg_hidtern', 'cotm', 'tmu_tm', 'fptm', 'tnn')
 MAC = {}
+ALIAS = {'wos': 'wos', 'alerce': 'alerce', 'r52': 'reuters', 'sector': 'sector', 'rcv1': 'rcv', 'news20': 'news'}
 
 
 def mac(name, val):
-    MAC[name] = val
+    """LaTeX macro \\r<name>. Command names must consist of letters only."""
+    for k, v in ALIAS.items():
+        name = name.replace(k, v) if k != v else name
+    assert name.isalpha(), name
+    MAC[name] = val.replace('-', '$-$') if val.startswith('-') else val
 
 
 # ------------------------------------------------------------------ TMU runs
@@ -264,7 +269,7 @@ for i, ds in enumerate(C.DS_ES):
     ax.xaxis.set_minor_formatter(tk.NullFormatter())
     ax.set_title(f'({chr(97 + i)}) {R.NAME[ds]}')
     if i >= 4:
-        ax.set_xlabel('Total clauses (hidden units for TNN)')
+        ax.set_xlabel('Total clauses (first-layer units for TNN)')
     if i % 2 == 0:
         ax.set_ylabel('Test macro F1 (%)')
     ax.grid(alpha=0.3)
