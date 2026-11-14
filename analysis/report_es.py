@@ -31,9 +31,10 @@ NAME = {'wos': 'WOS, 133 classes', 'alerce': 'ALeRCE, 15 classes', 'r52': 'R52, 
 PAIRS = (('gg_hidtern', 'gg_lintern'), ('gg_hidtern', 'tnn'), ('gg_hidtern', 'cotm'), ('gg_hidtern', 'fptm'),
          ('gg_lintern', 'cotm'), ('gg_lintern', 'fptm'), ('gg_lintern', 'tnn'))
 LABEL = {'gg_hidtern': 'GG-TH', 'gg_lintern': 'GG, ternary linear readout', 'tnn': 'Ternary net, no clauses',
-         'cotm': 'CoTM, tuned', 'fptm': 'FPTM', 'gg_lin': 'GG-linear, rounded to ternary'}
+         'cotm': 'CoTM, tuned', 'fptm': 'FPTM', 'gg_lin': 'GG-linear, rounded to ternary',
+         'gg_linr': 'GG-linear rounded, own tuning'}
 STYLE = {'gg_hidtern': ('#1b7837', 'o', '-'), 'gg_lintern': ('#5aae61', 's', '--'), 'tnn': ('#762a83', '^', '-'),
-         'cotm': ('#b2182b', 'v', ':'), 'fptm': ('#2166ac', 'D', '-.')}
+         'cotm': ('#b2182b', 'v', ':'), 'fptm': ('#2166ac', 'D', '-.'), 'gg_linr': ('#e08214', 'P', '-')}
 FIG = os.path.join(C.ROOT, 'figures')
 
 
@@ -45,7 +46,10 @@ def at_best(path):
         return None
     if not d.get('done'):
         return None
-    e = {r['epoch']: r for r in d['epochs']}[d['best_epoch']]
+    e = dict({r['epoch']: r for r in d['epochs']}[d['best_epoch']])
+    if '/gg_linr/' in path:                         # deployed model: the rounded readout
+        for k in ('val_acc', 'val_bacc', 'val_f1', 'test_acc', 'test_bacc', 'test_f1'):
+            e[k] = e[k + '_round']
     cap = es.EXT['epochs'] if '/ext_' in path else es.FINAL['epochs'] if '/final_' in path else es.TUNE['epochs']
     return dict(e, best_epoch=d['best_epoch'], n_epochs=len(d['epochs']), cap=cap)
 
@@ -67,7 +71,7 @@ def dense_bits(model, ds, n, cfg):
     o, m = C.O[ds], C.M[ds]
     if model in ('gg_hidtern', 'tnn'):
         return 2 * o * n + 2 * cfg['H'] * n + 2 * m * cfg['H']
-    if model in ('gg_lintern', 'gg_lin'):
+    if model in ('gg_lintern', 'gg_lin', 'gg_linr'):
         return 2 * o * n + 2 * m * n
     return 2 * o * n
 
@@ -107,7 +111,10 @@ for ds in C.DS_ES:
     for n in BUD:
         nn = n if PH == 'final' else C.anchor(n)
         for model in es.MODELS:
-            c = es.best_cfg(model, ds, n)
+            try:
+                c = es.best_cfg(model, ds, n)
+            except Exception:                      # tuning of this model not finished
+                continue
             add(ds, model, n, n, c, lambda ph, s: es.ofile(ph, model, ds, nn, c, s), dense_bits(model, ds, n, c))
         if n == 1000:
             c = dict(es.best_cfg('gg_lintern', ds, n))
@@ -153,7 +160,10 @@ L += ['', '| Model | Dataset | Anchor | Best setting | Validation F1 |', '|---|-
 for m in es.MODELS:
     for ds in C.DS_ES:
         for a in (1000, 200):
-            c = es.best_cfg(m, ds, a)
+            try:
+                c = es.best_cfg(m, ds, a)
+            except Exception:
+                continue
             L.append(f'| {LABEL[m]} | {ds} | {a} | {es.tag(c)} | {es.best_val(es.ofile("tune", m, ds, a, c, 1)) * 100:.2f} |')
 
 L += ['', 'Selected settings on a grid boundary, axes with more than two values (grids not extended for these, see '
@@ -162,7 +172,10 @@ for m in es.MODELS:
     ax = {k: sorted({g[k] for g in es.GRIDS[m]}) for k in es.GRIDS[m][0] if len({g[k] for g in es.GRIDS[m]}) > 1}
     for ds in C.DS_ES:
         for a in (1000, 200):
-            c = es.best_cfg(m, ds, a)
+            try:
+                c = es.best_cfg(m, ds, a)
+            except Exception:
+                continue
             e = [f'{k}={c[k]} ({"lower" if c[k] == v[0] else "upper"} edge)' for k, v in ax.items()
                  if len(v) > 2 and c[k] in (v[0], v[-1])]
             if e:

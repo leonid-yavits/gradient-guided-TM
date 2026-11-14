@@ -11,7 +11,7 @@ Protocol
 
   ext  : rerun, with up to 120 epochs, every final setting with a seed whose best epoch fell near the cap.
 
-  python experiments/es.py tune|final|ext|all [--workers 2] [--dry]
+  python experiments/es.py tune|final|ext|all [--workers 2] [--dry] [--models m1,m2]
 Runs are checkpointed every epoch and resumed after an interruption; completed runs are skipped.
 """
 import argparse
@@ -37,6 +37,9 @@ GRIDS = {
     'gg_hidtern': [dict(s=s, lr=lr, H=H) for s, lr, H in itertools.product((1.5, 2, 5, 10, 20, 40), (1e-3, 3e-3), (128, 256))],
     'gg_lintern': [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((1.5, 2, 5, 10, 20), (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2))],
     'tnn':        [dict(s=0, lr=lr, H=H) for lr, H in itertools.product((3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2), (128, 256))],
+    # GG-linear with post-hoc ternary rounding, tuned and early-stopped on the rounded validation macro F1
+    # (experiments/PROTOCOL_gglin.md). Same grid as gg_lintern.
+    'gg_linr':    [dict(s=s, lr=lr, H=0) for s, lr in itertools.product((1.5, 2, 5, 10, 20), (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2))],
     'cotm':       [dict(s=s, Tm=t, H=0) for s, t in itertools.product((1.5, 2, 5, 10, 20), (0.03, 0.1, 0.3, 1.0, 2.5, 5.0, 10.0, 20.0))],
 }
 MODELS = tuple(GRIDS)
@@ -62,7 +65,8 @@ def finished(path):
 
 
 def best_val(path):
-    return max(e['val_f1'] for e in json.load(open(path))['epochs'])
+    key = 'val_f1_round' if '/gg_linr/' in path else 'val_f1'
+    return max(e[key] for e in json.load(open(path))['epochs'])
 
 
 def best_cfg(model, ds, n):
@@ -106,12 +110,16 @@ def ours_job(phase, model, ds, n, cfg, seed, readout=None):
     if finished(out):
         return None
     P = {'tune': TUNE, 'final': FINAL, 'ext': EXT}[phase]
+    if model == 'gg_linr':
+        readout = 'gg_lin'
     cmd = [sys.executable, os.path.join(C.ROOT, 'train.py'), '--dataset', ds, '--readout', readout or model,
            '--clauses', str(n), '--lr', str(cfg.get('lr', 2e-3)), '--H', str(cfg['H'] or 256),
            '--P', str(C.PCLS[ds]), '--epochs', str(P['epochs']), '--patience', str(P['patience']),
            '--seed', str(seed), '--out', out, '--resume']
     if cfg.get('s'):
         cmd += ['--s', str(cfg['s'])]
+    if model == 'gg_linr':
+        cmd += ['--select', 'f1_round']
     if 'Tm' in cfg:
         cmd += ['--T', str(cfg['Tm'] * n)]
     return cmd, out
@@ -194,6 +202,9 @@ if __name__ == '__main__':
     ap.add_argument('phase', choices=['tune', 'final', 'ext', 'all'])
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--dry', action='store_true')
+    ap.add_argument('--models', default='', help='comma-separated subset of the models (default: all)')
     a = ap.parse_args()
+    if a.models:
+        MODELS = tuple(m for m in MODELS if m in a.models.split(','))
     for ph in (('tune', 'final') if a.phase == 'all' else (a.phase,)):
         execute(tune_jobs() if ph == 'tune' else final_jobs(ph), a.workers, a.dry)

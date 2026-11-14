@@ -54,7 +54,8 @@ def run(args):
             bank = ClauseBank(args.clauses, Xtr.shape[1], N=args.N, s=args.s, rng=rng)
             ro = make_readout(args.readout, args.clauses, m, rng, T=args.T, H=args.H, lr=args.lr)
         log = {'args': vars(args), 'epochs': []}
-    best = max([(e['val_f1'], e['epoch']) for e in log['epochs']], default=(-1.0, 0))
+    sel = 'val_f1_round' if getattr(args, 'select', 'f1') == 'f1_round' else 'val_f1'
+    best = max([(e[sel], e['epoch']) for e in log['epochs']], default=(-1.0, 0))
     for ep in range(len(log['epochs']), args.epochs):
         if args.patience and ep - best[1] >= args.patience:
             break
@@ -78,7 +79,7 @@ def run(args):
                 a, ba, f = metrics(y, predict(bank, ro, X, rounded=True))
                 rec.update({f'{split}_acc_round': a, f'{split}_bacc_round': ba, f'{split}_f1_round': f})
         log['epochs'].append(rec)
-        best = max(best, (rec['val_f1'], rec['epoch']))
+        best = max(best, (rec[sel], rec['epoch']))
         print(json.dumps(rec), flush=True)
         if args.out:
             with open(args.out, 'w') as f:
@@ -112,6 +113,9 @@ def parser():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--out', default='', help='JSON log, rewritten after every epoch')
     ap.add_argument('--patience', type=int, default=0, help='stop after this many epochs without a validation macro F1 gain (0: off)')
+    ap.add_argument('--select', default='f1', choices=['f1', 'f1_round'],
+                    help='early stopping and best epoch on validation macro F1 (f1) or, for gg_lin, on the validation '
+                         'macro F1 of the post-hoc rounded readout (f1_round)')
     ap.add_argument('--resume', action='store_true', help='checkpoint every epoch to <out>.ckpt and resume from it')
     return ap
 
