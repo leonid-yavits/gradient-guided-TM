@@ -156,6 +156,18 @@ for m in es.MODELS:
             c = es.best_cfg(m, ds, a)
             L.append(f'| {LABEL[m]} | {ds} | {a} | {es.tag(c)} | {es.best_val(es.ofile("tune", m, ds, a, c, 1)) * 100:.2f} |')
 
+L += ['', 'Selected settings on a grid boundary, axes with more than two values (grids not extended for these, see '
+      'experiments/PROTOCOL_text.md):', '']
+for m in es.MODELS:
+    ax = {k: sorted({g[k] for g in es.GRIDS[m]}) for k in es.GRIDS[m][0] if len({g[k] for g in es.GRIDS[m]}) > 1}
+    for ds in C.DS_ES:
+        for a in (1000, 200):
+            c = es.best_cfg(m, ds, a)
+            e = [f'{k}={c[k]} ({"lower" if c[k] == v[0] else "upper"} edge)' for k, v in ax.items()
+                 if len(v) > 2 and c[k] in (v[0], v[-1])]
+            if e:
+                L.append(f'- {LABEL[m]}, {ds}, anchor {a}: ' + ', '.join(e))
+
 for key, title in (('test_f1', 'Macro F1'), ('test_bacc', 'Balanced accuracy'), ('test_acc', 'Accuracy')):
     for ds in C.DS_ES:
         L += ['', f'## {title}, {NAME[ds]}', '',
