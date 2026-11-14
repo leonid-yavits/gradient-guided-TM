@@ -26,7 +26,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'experiments'))
 import config as C
 import es
 
-NAME = {'wos': 'WOS, 133 classes', 'alerce': 'ALeRCE, 15 classes'}
+NAME = {'wos': 'WOS, 133 classes', 'alerce': 'ALeRCE, 15 classes', 'r52': 'R52, 52 classes',
+        'sector': 'Sector, 105 classes', 'rcv1': 'RCV1, 51 classes', 'news20': '20 Newsgroups, 20 classes'}
+PAIRS = (('gg_hidtern', 'gg_lintern'), ('gg_hidtern', 'tnn'), ('gg_hidtern', 'cotm'), ('gg_hidtern', 'fptm'),
+         ('gg_lintern', 'cotm'), ('gg_lintern', 'fptm'), ('gg_lintern', 'tnn'))
 LABEL = {'gg_hidtern': 'GG-TH', 'gg_lintern': 'GG, ternary linear readout', 'tnn': 'Ternary net, no clauses',
          'cotm': 'CoTM, tuned', 'fptm': 'FPTM', 'gg_lin': 'GG-linear, rounded to ternary'}
 STYLE = {'gg_hidtern': ('#1b7837', 'o', '-'), 'gg_lintern': ('#5aae61', 's', '--'), 'tnn': ('#762a83', '^', '-'),
@@ -206,15 +209,41 @@ if EXTENDED:
         f = lambda rr: f'{ms(rr, "test_f1")[0]:.2f} ± {ms(rr, "test_f1")[1]:.2f}'
         L.append(f'| {ds} | {n} | {LABEL[m]} | {f(r60)} | {f(r)} | {", ".join(str(q["best_epoch"]) for q in r)} |')
 
+# Pairwise comparisons (PROTOCOL_text.md: GG-TH against all models; GG with a ternary linear readout against CoTM,
+# FPTM and the ternary net). Per dataset over the budgets where both models have results.
+L += ['', '## Pairwise comparisons per dataset (test macro F1)', '',
+      'Mean difference A − B over the budgets where both have results (FPTM: budgets with an FPTM size). '
+      'Wins and losses: budgets with p < 0.05 (Welch) in favour of A or of B.', '',
+      '| A | B | Dataset | Budgets | Mean A − B | Range of A − B | A better (p<0.05) | B better (p<0.05) |',
+      '|---|---|---|---|---|---|---|---|']
+for a, b in PAIRS:
+    for ds in C.DS_ES:
+        d, w, l = [], 0, 0
+        for n in BUD:
+            xa, xb = get(ds, a, n), get(ds, b, n)
+            if xa is None or xb is None:
+                continue
+            va, vb = ms(xa['r'], 'test_f1')[2], ms(xb['r'], 'test_f1')[2]
+            d.append(va.mean() - vb.mean())
+            p = welch(va, vb)
+            w += int(p < 0.05 and va.mean() > vb.mean())
+            l += int(p < 0.05 and va.mean() < vb.mean())
+        if d:
+            L.append(f'| {LABEL[a]} | {LABEL[b]} | {ds} | {len(d)} | {np.mean(d):+.2f} | '
+                     f'{min(d):+.2f} to {max(d):+.2f} | {w} | {l} |')
+
 out_md = os.path.join(es.RES, 'summary.md' if PH == 'final' else 'summary_tune.md')
 open(out_md, 'w').write('\n'.join(L) + '\n')
 print('wrote', out_md)
 
 # ------------------------------------------------------------------ figure: macro F1 against clause budget
-fig = plt.figure(figsize=(10, 4.6))
-gs = GridSpec(2, 2, height_ratios=[1, 0.12], hspace=0.38, wspace=0.22)
-for i, ds in enumerate(C.DS_ES):
-    ax = fig.add_subplot(gs[0, i])
+DSF = [ds for ds in C.DS_ES if any(k[0] == ds for k in rows)]
+NC = 3 if len(DSF) > 2 else len(DSF)
+NR = -(-len(DSF) // NC)
+fig = plt.figure(figsize=(4.4 * NC, 3.7 * NR + 0.6))
+gs = GridSpec(NR + 1, NC, height_ratios=[1] * NR + [0.12], hspace=0.45, wspace=0.25)
+for i, ds in enumerate(DSF):
+    ax = fig.add_subplot(gs[i // NC, i % NC])
     for m in es.MODELS + ('fptm',):
         v = rows.get((ds, m), [])
         if not v:
@@ -227,11 +256,13 @@ for i, ds in enumerate(C.DS_ES):
     ax.set_xscale('log')
     ax.xaxis.set_major_formatter(tk.ScalarFormatter())
     ax.set_xticks([50, 100, 200, 500, 1000, 2000])
-    ax.set_xlabel('Total clauses (units for the ternary net)')
-    ax.set_ylabel('Test macro F1 (%)')
+    if i // NC == NR - 1 or i + NC >= len(DSF):
+        ax.set_xlabel('Total clauses (units for the ternary net)')
+    if i % NC == 0:
+        ax.set_ylabel('Test macro F1 (%)')
     ax.set_title(NAME[ds])
     ax.grid(alpha=0.3)
-lax = fig.add_subplot(gs[1, :])
+lax = fig.add_subplot(gs[NR, :])
 lax.axis('off')
 h = [Line2D([], [], color=STYLE[m][0], marker=STYLE[m][1], ls=STYLE[m][2], lw=1.5) for m in es.MODELS + ('fptm',)]
 lax.legend(h, [LABEL[m] for m in es.MODELS + ('fptm',)], loc='center', ncol=5, frameon=False, fontsize=9)
