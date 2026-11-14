@@ -8,6 +8,7 @@ results/**/*.log
 .DS_Store
 results_es/
 es_run.log
+tmu_run.log
 *.ckpt
 *.ckpt.tmp
 results_tmu/
