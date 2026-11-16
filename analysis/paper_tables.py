@@ -115,7 +115,7 @@ def fmt_cell(ds, m, n, ref='gg_lintern'):
     return s
 
 
-L = [r'\begin{tabular}{llrrrrrr}', r'\toprule',
+L = [r'\begin{tabular}{ll' + 'r' * len(COLS) + '}', r'\toprule',
      r'Dataset & $n$ & ' + ' & '.join(NAME[m] for m in COLS) + r' \\', r'\midrule']
 for i, ds in enumerate(C.DS_ES):
     for j, n in enumerate(C.BUDGETS):
@@ -178,6 +178,37 @@ mac('tlcotmmax', f'{max(g):.1f}')
 mac('tlcotmmean', f'{np.mean(g):.1f}')
 mac('tlcotmpos', str(sum(x > 0 for x in g)))
 
+
+# GG-TL_R against GG-TL, split by budget
+for lo, hi, tag in ((0, 200, 'small'), (500, 10 ** 9, 'large')):
+    W = Lo = N = 0
+    for ds in C.DS_ES:
+        for n in C.BUDGETS:
+            if not lo <= n <= hi:
+                continue
+            va, vb = f1(ds, 'gg_linr', n), f1(ds, 'gg_lintern', n)
+            if va is None or vb is None:
+                continue
+            p = R.welch(va[2], vb[2])
+            W, Lo, N = W + int(p < 0.05 and va[0] > vb[0]), Lo + int(p < 0.05 and va[0] < vb[0]), N + 1
+    mac(f'rnd{tag}win', str(W))
+    mac(f'rnd{tag}loss', str(Lo))
+    mac(f'rnd{tag}cells', str(N))
+
+# Multi-class TM: settings selected on the lower or upper edge of the grid
+sa = sorted({c['s'] for c in TC.GRID})
+ta = sorted({c['Tm'] for c in TC.GRID})
+bs = bt = na = 0
+for ds in C.DS_ES:
+    for a in (200, 1000):
+        c = TC.best_cfg('tmu_tm', ds, a)
+        na += 1
+        bs += int(c['s'] in (sa[0], sa[-1]))
+        bt += int(c['Tm'] in (ta[0], ta[-1]))
+mac('tmedges', str(bs))
+mac('tmedget', str(bt))
+mac('tmanchors', str(na))
+
 # ------------------------------------------------------------------ Table: post-hoc rounding at n = 1000
 L = [r'\begin{tabular}{lrrrr}', r'\toprule',
      r'Dataset & GG-linear, real & GG-linear, rounded & GG-TL & GG-TH \\', r'\midrule']
@@ -219,6 +250,11 @@ w('tab_tmu.tex', '\n'.join(L) + '\n')
 mac('tmuchecked', str(nchk))
 mac('tmuoursworse', str(nsig))
 mac('tmuoursbetter', str(nbet))
+# TMU runs resumed from a checkpoint after an interruption
+_tj = [os.path.join(dp, f) for dp, _, fs in os.walk(TC.RES) for f in fs if f.endswith('.json')]
+mac('tmuruns', str(len(_tj)))
+mac('tmuresumed', str(sum(bool(json.load(open(f)).get('resumed_after')) for f in _tj)))
+
 
 # ------------------------------------------------------------------ Table: clause length and memory
 SP = ('gg_lintern', 'gg_linr', 'gg_hidtern', 'cotm', 'tmu_tm', 'fptm')
