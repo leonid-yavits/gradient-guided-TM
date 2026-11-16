@@ -148,7 +148,7 @@ def pair(a, b, ds):
     return d, win, loss
 
 
-PAIRS = [('gg_lintern', 'cotm'), ('gg_hidtern', 'cotm'), ('gg_lintern', 'tmu_tm'), ('gg_hidtern', 'gg_lintern'),
+PAIRS = [('gg_lintern', 'cotm'), ('gg_hidtern', 'cotm'), ('gg_lintern', 'tmu_tm'), ('cotm', 'tmu_tm'), ('gg_hidtern', 'gg_lintern'),
          ('gg_lintern', 'fptm'), ('gg_lintern', 'tnn')]
 L = [r'\begin{tabular}{l' + 'r' * len(C.DS_ES) + 'r}', r'\toprule',
      r'Comparison & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' & Cells \\', r'\midrule']
@@ -197,7 +197,7 @@ w('tab_round.tex', '\n'.join(L) + '\n')
 # ------------------------------------------------------------------ Table: CoTM implementation check
 L = [r'\begin{tabular}{lrlrrr}', r'\toprule',
      r'Dataset & $n$ & Setting ($s$, $T/n$) & CoTM, ours & CoTM, TMU & $p$ \\', r'\midrule']
-nchk, nsig = 0, 0
+nchk, nsig, nbet = 0, 0, 0
 for ds in C.DS_ES:
     for n in TC.CHECK[ds]:
         cfg = TC.ours_cotm_cfg(ds, n)
@@ -210,12 +210,14 @@ for ds in C.DS_ES:
         p = R.welch(o[2], t[2])
         nchk += 1
         nsig += int(p < 0.05 and o[0] < t[0])
+        nbet += int(p < 0.05 and o[0] > t[0])
         L.append(f'{DSN[ds]} & {n} & {cfg["s"]}, {cfg["Tm"]} & {o[0]:.1f} $\\pm$ {o[1]:.1f} & '
                  f'{t[0]:.1f} $\\pm$ {t[1]:.1f} & {p:.3f} \\\\')
 L += [r'\bottomrule', r'\end{tabular}']
 w('tab_tmu.tex', '\n'.join(L) + '\n')
 mac('tmuchecked', str(nchk))
 mac('tmuoursworse', str(nsig))
+mac('tmuoursbetter', str(nbet))
 
 # ------------------------------------------------------------------ Table: clause length and memory
 SP = ('gg_lintern', 'gg_hidtern', 'cotm', 'tmu_tm', 'fptm')
