@@ -57,12 +57,19 @@ def tmu_runs(phase, model, ds, n, cfg):
     return r if len(r) == len(C.SEEDS) else []
 
 
+TM_DUP = []                                               # (ds, n) cells that repeat an earlier TM experiment
 for ds in C.DS_ES:
+    seen = set()
     for n in C.BUDGETS:
         try:
             cfg = TC.best_cfg('tmu_tm', ds, n)
         except Exception:
             continue
+        key = (C.cpc(ds, n), tuple(sorted(cfg.items())))
+        if key in seen:                                   # same clauses per class and setting as a smaller budget:
+            TM_DUP.append((ds, n))                        # the same experiment, listed once (as for FPTM)
+            continue
+        seen.add(key)
         r = tmu_runs('final', 'tmu_tm', ds, n, cfg)
         if r:
             cl = C.cpc(ds, n) * C.M[ds]
@@ -72,9 +79,9 @@ for ds in C.DS_ES:
                                                              f1=R.ms(r, 'test_f1')))
 
 
-def f1(ds, m, n):
+def f1(ds, m, n, key='test_f1'):
     x = R.get(ds, m, n)
-    return None if x is None else R.ms(x['r'], 'test_f1')
+    return None if x is None else R.ms(x['r'], key)
 
 
 def pval(ds, a, b, n, key='test_f1'):
@@ -149,7 +156,7 @@ def pair(a, b, ds):
 
 
 PAIRS = [('gg_lintern', 'cotm'), ('gg_hidtern', 'cotm'), ('gg_lintern', 'tmu_tm'), ('cotm', 'tmu_tm'), ('gg_hidtern', 'gg_lintern'),
-         ('gg_lintern', 'fptm'), ('gg_lintern', 'tnn'),
+         ('gg_lintern', 'fptm'), ('gg_lintern', 'tnn'), ('gg_hidtern', 'tnn'),
          ('gg_linr', 'gg_lintern'), ('gg_linr', 'cotm'), ('gg_linr', 'tmu_tm'), ('gg_linr', 'fptm'), ('gg_linr', 'tnn')]
 L = [r'\begin{tabular}{l' + 'r' * len(C.DS_ES) + 'r}', r'\toprule',
      r'Comparison & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' & Cells \\', r'\midrule']
@@ -276,6 +283,152 @@ fewer = [(R.get(ds, 'gg_lintern', n)['lit'], R.get(ds, 'cotm', n)['lit']) for ds
 mac('litfewer', str(sum(a < b for a, b in fewer)))
 mac('litcells', str(len(fewer)))
 
+
+# Cells where GG-TL clauses are not shorter than CoTM clauses
+exc = [(ds, n) for ds in C.DS_ES for n in C.BUDGETS if R.get(ds, 'gg_lintern', n) and R.get(ds, 'cotm', n)
+       and R.get(ds, 'gg_lintern', n)['lit'] >= R.get(ds, 'cotm', n)['lit']]
+mac('litexc', '; '.join(f'{DSN[d]}, $n={n}$' for d, n in exc) if exc else 'none')
+mac('tmdup', str(len(TM_DUP)))
+
+
+# ------------------------------------------------------------------ Tables: other metrics (appendix)
+def metric_table(key, fname):
+    L = [r'\begin{tabular}{ll' + 'r' * len(COLS) + '}', r'\toprule',
+         r'Dataset & $n$ & ' + ' & '.join(NAME[m] for m in COLS) + r' \\', r'\midrule']
+    for i, ds in enumerate(C.DS_ES):
+        for j, n in enumerate(C.BUDGETS):
+            vals = {m: f1(ds, m, n, key) for m in COLS}
+            best = max(v[0] for v in vals.values() if v is not None)
+            cells = []
+            for m in COLS:
+                v = vals[m]
+                if v is None:
+                    cells.append('--')
+                    continue
+                c = f'{v[0]:.1f}'
+                if m != 'gg_lintern':
+                    ref = vals['gg_lintern']
+                    if R.welch(v[2], ref[2]) < 0.05:
+                        c += r'$^{+}$' if v[0] > ref[0] else r'$^{-}$'
+                if abs(v[0] - best) < 1e-9:
+                    c = r'\textbf{' + c.split('$')[0] + '}' + c[len(c.split('$')[0]):]
+                cells.append(c)
+            L.append((DSN[ds] if j == 0 else '') + f' & {n} & ' + ' & '.join(cells) + r' \\')
+        if i < len(C.DS_ES) - 1:
+            L.append(r'\midrule')
+    L += [r'\bottomrule', r'\end{tabular}']
+    w(fname, '\n'.join(L) + '\n')
+
+
+metric_table('test_bacc', 'tab_bacc.tex')
+metric_table('test_acc', 'tab_acc.tex')
+
+# GG-TL against CoTM and TM under the three metrics
+MET = (('test_f1', 'Macro F1'), ('test_bacc', 'Balanced accuracy'), ('test_acc', 'Accuracy'))
+L = [r'\begin{tabular}{ll' + 'r' * len(C.DS_ES) + 'r}', r'\toprule',
+     r'Comparison & Metric & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' & Cells \\', r'\midrule']
+for a, b in (('gg_lintern', 'cotm'), ('gg_lintern', 'tmu_tm')):
+    for k, (key, lab) in enumerate(MET):
+        cells, W, Lo, N, pos = [], 0, 0, 0, 0
+        for ds in C.DS_ES:
+            d, win, loss = [], 0, 0
+            for n in C.BUDGETS:
+                va, vb = f1(ds, a, n, key), f1(ds, b, n, key)
+                if va is None or vb is None:
+                    continue
+                d.append(va[0] - vb[0])
+                p = R.welch(va[2], vb[2])
+                win += int(p < 0.05 and va[0] > vb[0])
+                loss += int(p < 0.05 and va[0] < vb[0])
+            cells.append(f'{np.mean(d):+.1f} ({win}/{loss})'.replace('-', '$-$'))
+            W, Lo, N, pos = W + win, Lo + loss, N + len(d), pos + sum(x > 0 for x in d)
+        mk = {'test_f1': 'mf', 'test_bacc': 'bacc', 'test_acc': 'acc'}[key]
+        mac(f'met{a}{b}{mk}'.replace('_', '') + 'pos', str(pos))
+        mac(f'met{a}{b}{mk}'.replace('_', '') + 'win', str(W))
+        mac(f'met{a}{b}{mk}'.replace('_', '') + 'loss', str(Lo))
+        L.append((f'{NAME[a]} $-$ {NAME[b]}' if k == 0 else '') + f' & {lab} & ' + ' & '.join(cells) +
+                 f' & {W}/{Lo} of {N}' + r' \\')
+    L.append(r'\midrule')
+L = L[:-1] + [r'\bottomrule', r'\end{tabular}']
+w('tab_metrics.tex', '\n'.join(L) + '\n')
+
+
+# ------------------------------------------------------------------ Table: selected settings on a grid edge
+def edges(grid, cfg):
+    out = []
+    for ax in ('s', 'lr', 'Tm', 'H'):
+        vals = sorted({g[ax] for g in grid if ax in g and g[ax]})
+        if len(vals) < 3 or not cfg.get(ax):
+            continue
+        nm = {'s': '$s', 'lr': '$\\eta', 'Tm': '$T/n', 'H': '$H'}[ax]
+        if cfg[ax] == vals[0]:
+            out.append(nm + '{\\downarrow}$')
+        elif cfg[ax] == vals[-1]:
+            out.append(nm + '{\\uparrow}$')
+    return out
+
+
+AXN = {'s': '$s$', 'lr': 'lr', 'Tm': '$T/n$'}
+L = [r'\begin{tabular}{l' + 'l' * len(C.DS_ES) + '}', r'\toprule',
+     r'Model & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' \\', r'\midrule']
+nedge = {}
+for m in ('gg_lintern', 'gg_linr', 'gg_hidtern', 'cotm', 'tnn', 'tmu_tm'):
+    cells = []
+    for ds in C.DS_ES:
+        parts = []
+        for a in (200, 1000):
+            if m == 'tmu_tm':
+                e = edges(TC.GRID, TC.best_cfg('tmu_tm', ds, a))
+            else:
+                e = edges(es.GRIDS[m], es.best_cfg(m, ds, a))
+            nedge[m] = nedge.get(m, 0) + int(bool(e))
+            if e:
+                parts.append(f'{a}: ' + ', '.join(e))
+        cells.append('; '.join(parts) if parts else '--')
+    L.append(NAME[m] + ' & ' + ' & '.join(cells) + r' \\')
+L += [r'\bottomrule', r'\end{tabular}']
+w('tab_edges.tex', '\n'.join(L).replace('lr$', 'lr$') + '\n')
+for m, k in nedge.items():
+    mac(f'edge{m}'.replace('_', ''), str(k))
+
+
+# ------------------------------------------------------------------ Table: training time per epoch at the anchors
+def sec_per_epoch(paths, key):
+    v = []
+    for p in paths:
+        try:
+            v += [e[key] for e in json.load(open(p))['epochs']]
+        except Exception:
+            return None
+    return np.mean(v) if v else None
+
+
+def time_paths(m, ds, n):
+    if m in ('gg_lintern', 'cotm', 'gg_hidtern', 'tnn'):
+        c = es.best_cfg(m, ds, n)
+        return [es.ofile('final', m, ds, n, c, s) for s in C.SEEDS], 'sec'
+    if m == 'fptm':
+        nf = next(b for b in C.fptm_sizes(ds) if C.cpc(ds, b) == C.cpc(ds, n))   # budget at which this size was run
+        c = es.fptm_best(ds, nf)
+        return [es.ffile('final', ds, nf, c, s) for s in C.SEEDS], 'sec'
+    c = TC.best_cfg('tmu_tm', ds, n)
+    return [TC.ofile('final', 'tmu_tm', ds, n, c, s) for s in C.SEEDS], 'train_s'
+
+
+TM_ = ('gg_lintern', 'cotm', 'gg_hidtern', 'tnn', 'tmu_tm', 'fptm')
+L = [r'\begin{tabular}{lr' + 'r' * len(TM_) + '}', r'\toprule',
+     r'Dataset & $n$ & ' + ' & '.join(NAME[m] for m in TM_) + r' \\', r'\midrule']
+for ds in C.DS_ES:
+    for n in (200, 1000):
+        cells = []
+        for m in TM_:
+            ps, key = time_paths(m, ds, n)
+            v = sec_per_epoch(ps, key) if ps else None
+            cells.append('--' if v is None else (f'{v:.1f}' if v < 100 else f'{v:.0f}'))
+        L.append(f'{DSN[ds]} & {n} & ' + ' & '.join(cells) + r' \\')
+L += [r'\bottomrule', r'\end{tabular}']
+w('tab_time.tex', '\n'.join(L) + '\n')
+
 # ------------------------------------------------------------------ macros
 w('results_macros.tex', '%% Generated by gg-th/analysis/paper_tables.py. Do not edit by hand.\n' +
   '\n'.join(f'\\newcommand{{\\r{k}}}{{{v}}}' for k, v in sorted(MAC.items())) + '\n')
@@ -289,7 +442,7 @@ fig = plt.figure(figsize=(7.2, 8.6))
 gs = GridSpec(4, 2, height_ratios=[0.12, 1, 1, 1], hspace=0.55, wspace=0.28, figure=fig)
 lax = fig.add_subplot(gs[0, :])
 lax.axis('off')
-present = [m for m in COLS if any(k[1] == m for k in R.rows)]
+present = [m for m in COLS if m != 'gg_linr' and any(k[1] == m for k in R.rows)]
 lax.legend([Line2D([], [], color=STY[m][0], marker=STY[m][1], ls=STY[m][2], lw=1.5, ms=5) for m in present],
            [NAME[m] for m in present], loc='center', ncol=len(present), frameon=False, fontsize=9.5)
 for i, ds in enumerate(C.DS_ES):
