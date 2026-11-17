@@ -755,12 +755,14 @@ if len(DUMP) == 3 * len(C.DS_ES) * len(ANCH):
                 cells.append(f'{pl.mean():.1f} / {ng.mean():.1f}')
             L.append((f'{NAME[m]}: plain / negated literals' if a == ANCH[0] else '') + f' & {a} & ' +
                      ' & '.join(cells) + r' \\')
+    votefrac = []
     for a in ANCH:
         cells = []
         for ds in C.DS_ES:
             Wt = DUMP[('gg_lintern', ds, a)]['W']
-            cells.append(f'{(Wt != 0).sum(0).mean():.1f}')
-        L.append(('GG-TL: nonzero votes per clause' if a == ANCH[0] else '') + f' & {a} & ' + ' & '.join(cells) +
+            votefrac.append((Wt != 0).sum(0).mean() / Wt.shape[0])
+            cells.append(f'{(Wt != 0).sum(0).mean():.1f} / {Wt.shape[0]}')
+        L.append(('GG-TL: nonzero votes / $m$' if a == ANCH[0] else '') + f' & {a} & ' + ' & '.join(cells) +
                  r' \\')
     for a in ANCH:
         cells = []
@@ -779,6 +781,8 @@ if len(DUMP) == 3 * len(C.DS_ES) * len(ANCH):
     mac('dumpcotmnegmax', f'{100 * max(cneg):.0f}')
     bits = [int(np.ceil(np.log2(2 * int(np.abs(DUMP[('cotm', ds, a)]['W']).max()) + 1))) for ds in C.DS_ES
             for a in ANCH]
+    mac('dumpggvotemin', f'{100 * min(votefrac):.0f}')
+    mac('dumpggvotemax', f'{100 * max(votefrac):.0f}')
     mac('dumpcotmbitsmin', str(min(bits)))
     mac('dumpcotmbitsmax', str(max(bits)))
     # the dump runs repeat the seed-1 FINAL runs: largest deviation of the best validation F1 from the originals
