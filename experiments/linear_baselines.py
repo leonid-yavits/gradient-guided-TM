@@ -47,12 +47,14 @@ def main():
             path = os.path.join(OUT, f'{model}_{ds}.json')
             if os.path.exists(path):
                 continue
-            tune = []
-            for Cv, cw in GRID:
+            part = path + '.part'                     # tuning results kept across interruptions
+            tune = json.load(open(part)) if os.path.exists(part) else []
+            for Cv, cw in GRID[len(tune):]:
                 t0 = time.time()
                 clf = make(model, Cv, cw, 1).fit(Xtr, ytr)
                 tune.append(dict(C=Cv, class_weight=cw, val=evaluate(clf, Xva, yva), sec=time.time() - t0))
                 print(ds, model, Cv, cw, round(tune[-1]['val']['f1'], 4), flush=True)
+                json.dump(tune, open(part, 'w'))
             b = max(tune, key=lambda r: r['val']['f1'])
             final = []
             for seed in C.SEEDS:
@@ -62,6 +64,7 @@ def main():
                                   sec=time.time() - t0))
             json.dump(dict(model=model, ds=ds, tune=tune, best=dict(C=b['C'], class_weight=b['class_weight']),
                            final=final, done=True), open(path, 'w'), indent=1)
+            os.remove(part)
 
 
 if __name__ == '__main__':
