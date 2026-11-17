@@ -12,3 +12,5 @@ tmu_run.log
 *.ckpt
 *.ckpt.tmp
 results_tmu/
+results_rev1/
+rev1_run.log

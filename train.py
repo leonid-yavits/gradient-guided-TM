@@ -37,6 +37,18 @@ def _save(path, state):
     os.replace(tmp, path)
 
 
+def dump_model(path, bank, ro, epoch):
+    """Clause include masks and readout weights at the current best validation epoch (analysis of clauses)."""
+    W = getattr(ro, 'W', None)
+    if W is not None and getattr(ro, 'kind', '') == 'gg_lintern':
+        from ggth.tm import ternarize
+        W = ternarize(W)
+    tmp = path + '.tmp.npz'
+    np.savez_compressed(tmp, include=np.packbits(bank.include(), axis=1), n_lit=bank.C.shape[1], epoch=epoch,
+                        W=W if W is not None else np.zeros(0), b=getattr(ro, 'b', np.zeros(0)))
+    os.replace(tmp, path)
+
+
 def run(args):
     ckpt = args.out + '.ckpt' if args.out and args.resume else None
     d = load_prepared(args.dataset, args.data)
@@ -52,7 +64,10 @@ def run(args):
             bank, ro = None, TernaryNet(Xtr.shape[1], args.clauses, m, rng, H=args.H, lr=args.lr)
         else:
             bank = ClauseBank(args.clauses, Xtr.shape[1], N=args.N, s=args.s, rng=rng)
-            ro = make_readout(args.readout, args.clauses, m, rng, T=args.T, H=args.H, lr=args.lr)
+            abl = {}
+            if args.readout != 'cotm':
+                abl = dict(fb=args.fb, no_pfac=args.no_pfac, no_mag=args.no_mag, no_bias=args.no_bias)
+            ro = make_readout(args.readout, args.clauses, m, rng, T=args.T, H=args.H, lr=args.lr, **abl)
         log = {'args': vars(args), 'epochs': []}
     sel = 'val_f1_round' if getattr(args, 'select', 'f1') == 'f1_round' else 'val_f1'
     best = max([(e[sel], e['epoch']) for e in log['epochs']], default=(-1.0, 0))
@@ -79,6 +94,8 @@ def run(args):
                 a, ba, f = metrics(y, predict(bank, ro, X, rounded=True))
                 rec.update({f'{split}_acc_round': a, f'{split}_bacc_round': ba, f'{split}_f1_round': f})
         log['epochs'].append(rec)
+        if getattr(args, 'dump', '') and bank is not None and rec[sel] > best[0]:
+            dump_model(args.dump, bank, ro, rec['epoch'])
         best = max(best, (rec[sel], rec['epoch']))
         print(json.dumps(rec), flush=True)
         if args.out:
@@ -117,6 +134,12 @@ def parser():
                     help='early stopping and best epoch on validation macro F1 (f1) or, for gg_lin, on the validation '
                          'macro F1 of the post-hoc rounded readout (f1_round)')
     ap.add_argument('--resume', action='store_true', help='checkpoint every epoch to <out>.ckpt and resume from it')
+    ap.add_argument('--fb', default='gg', choices=['gg', 'cotm'],
+                    help='clause feedback of gg_lintern: GG (default) or the CoTM rule on the ternary votes with margin --T')
+    ap.add_argument('--no_pfac', action='store_true', help='ablation: drop the factor (1 - p_y) of GG feedback')
+    ap.add_argument('--no_mag', action='store_true', help='ablation: replace min(1, |g|/mean|g|) of GG feedback by 1')
+    ap.add_argument('--no_bias', action='store_true', help='ablation: keep the class offsets of gg_lintern at 0')
+    ap.add_argument('--dump', default='', help='write clause include masks and readout weights at the best epoch (.npz)')
     return ap
 
 

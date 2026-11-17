@@ -120,9 +120,14 @@ class CoTMReadout:
 class GGReadout:
     """Differentiable readout trained by Adam. Its clause gradients drive GG feedback."""
 
-    def __init__(self, kind, n, m, rng, H=256, lr=2e-3):
+    def __init__(self, kind, n, m, rng, H=256, lr=2e-3, fb='gg', T=None, no_pfac=False, no_mag=False, no_bias=False):
         assert kind in ('gg_lin', 'gg_lintern', 'gg_hidtern'), kind
+        assert fb == 'gg' or kind == 'gg_lintern', 'CoTM clause feedback is implemented for gg_lintern only'
         self.kind, self.n, self.m, self.H, self.rng = kind, n, m, H, rng
+        # Ablations (experiments/PROTOCOL_rev1.md): fb='cotm' replaces GG clause feedback by the CoTM rule applied to
+        # the ternary votes (margin T); no_pfac drops the factor (1 - p_y); no_mag replaces min(1, |g|/mean|g|) by 1;
+        # no_bias fixes the class offsets at 0.
+        self.fb, self.T, self.no_pfac, self.no_mag, self.no_bias = fb, T, no_pfac, no_mag, no_bias
         sc = 1.0 / np.sqrt(n)
         if kind == 'gg_lin':
             self.W = (rng.standard_normal((m, n)) * sc).astype(np.float32)
@@ -184,6 +189,8 @@ class GGReadout:
             gb = dz.sum(0)
             ga = np.array([np.sum(dz * v)], np.float32)
             dc = self.a[0] * (dz @ Wt)
+            if self.no_bias:
+                gb = np.zeros_like(gb)
             self.opt.step([gW, gb, ga])
             self.a[0] = max(self.a[0], 1e-4)
         else:
@@ -201,17 +208,36 @@ class GGReadout:
             self.opt.step([gW1, gb1, gW2, gb2, ga1, ga2])
             self.a1[0] = max(self.a1[0], 1e-4)
             self.a2[0] = max(self.a2[0], 1e-4)
+        if self.fb == 'cotm':
+            return self.cotm_feedback(c, y, cache[0], cache[1])
         # GG feedback: g = d log p_y / dc = -B * dc
         g = -dc * B
-        d = 1.0 - p[np.arange(B), y]
+        d = np.ones(B, np.float32) if self.no_pfac else 1.0 - p[np.arange(B), y]
         mag = np.abs(g)
         norm = mag.mean(1, keepdims=True) + 1e-12
-        prob = d[:, None] * np.minimum(1.0, mag / norm)
+        prob = d[:, None] * (1.0 if self.no_mag else np.minimum(1.0, mag / norm))
         sel = (self.rng.random(prob.shape, dtype=np.float32) <= prob).astype(np.float32)
         return sel * (g > 0), sel * (g < 0)
 
 
-def make_readout(kind, n, m, rng, T=None, H=256, lr=2e-3):
+    def cotm_feedback(self, c, y, Wt, v):
+        """Clause feedback of the CoTM rule (CoTMReadout.train_step) on the ternary votes; weights are not changed."""
+        B, n = c.shape
+        T = self.T
+        v = np.clip(v, -T, T)
+        q = (y + self.rng.integers(1, self.m, size=B)) % self.m
+        ar = np.arange(B)
+        d_y = (T - v[ar, y]) / (2 * T)
+        d_q = (T + v[ar, q]) / (2 * T)
+        sel_y = (self.rng.random((B, n)) <= d_y[:, None]).astype(np.float32)
+        sel_q = (self.rng.random((B, n)) <= d_q[:, None]).astype(np.float32)
+        pos_y, pos_q = (Wt[y] >= 0), (Wt[q] >= 0)
+        SI = np.clip(sel_y * pos_y + sel_q * (~pos_q), 0, 1)
+        SII = np.clip(sel_y * (~pos_y) + sel_q * pos_q, 0, 1)
+        return SI, SII * (1 - SI)
+
+
+def make_readout(kind, n, m, rng, T=None, H=256, lr=2e-3, **abl):
     if kind == 'cotm':
         return CoTMReadout(n, m, T if T is not None else 2.5 * n, rng)
-    return GGReadout(kind, n, m, rng, H=H, lr=lr)
+    return GGReadout(kind, n, m, rng, H=H, lr=lr, T=T, **abl)
