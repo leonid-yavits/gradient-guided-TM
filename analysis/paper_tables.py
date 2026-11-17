@@ -505,11 +505,12 @@ ABLN = (('fb_cotm', 'CoTM clause feedback'), ('no_pfac', r'No factor $1-p_y$'),
 
 
 def abl_runs(name, ds, a):
-    if name == 'fb_cotm':
+    if name in ('fb_cotm', 'fb_cotm_a'):     # fb_cotm: selected over parts A and A2; fb_cotm_a: part A only
         try:
-            c = RV.fbcotm_best(ds, a)
+            c = RV.fbcotm2_best(ds, a) if name == 'fb_cotm' else RV.fbcotm_best(ds, a)
         except Exception:
             return None
+        return runs([RV.rfile('abl', 'fb_cotm', 'final', ds, a, c, s) for s in C.SEEDS])
     else:
         c = es.best_cfg('gg_lintern', ds, a)
     return runs([RV.rfile('abl', name, 'final', ds, a, c, s) for s in C.SEEDS])
@@ -534,10 +535,17 @@ if ABL_OK:
             W, Lo, N, D = W + wi, Lo + lo, N + len(d), D + d
         mac(f'abl{nm}'.replace('_', '') + 'win', str(W))
         mac(f'abl{nm}'.replace('_', '') + 'loss', str(Lo))
-        mac(f'abl{nm}'.replace('_', '') + 'mean', f'{np.mean(D):.1f}'.replace('-', ''))
+        mac(f'abl{nm}'.replace('_', '') + 'mean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, variant - GG-TL
         L.append(f'{lab} & ' + ' & '.join(cells) + f' & {W}/{Lo} of {N}' + r' \\')
         if nm == 'no_bias':
             L.append(r'\midrule')
+    # part A only (Tm taken from the CoTM, before addendum A2)
+    D = [mv(abl_runs('fb_cotm_a', ds, a)).mean() - mv(ours60('gg_lintern', ds, a)).mean() for ds in C.DS_ES
+         for a in ANCH]
+    mac('ablfbcotmAmean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))
+    # Tm of the selected fb_cotm setting relative to the Tm of the CoTM
+    tms = [(RV.fbcotm2_best(ds, a)['Tm'], es.best_cfg('cotm', ds, a)['Tm']) for ds in C.DS_ES for a in ANCH]
+    mac('ablfbcotmTmsmaller', str(sum(x < y for x, y in tms)))
     # CoTM clause feedback with the GG readout against our CoTM
     W = Lo = 0
     D = []
@@ -549,7 +557,7 @@ if ABL_OK:
             W, Lo = W + (s == '+'), Lo + (s == '-')
     mac('fbcotmvscotmwin', str(W))
     mac('fbcotmvscotmloss', str(Lo))
-    mac('fbcotmvscotmmean', f'{np.mean(D):.1f}'.replace('-', ''))
+    mac('fbcotmvscotmmean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, fb_cotm - CoTM
     mac('fbcotmvscotmpos', str(sum(d > 0 for d in D)))
     L += [r'\bottomrule', r'\end{tabular}']
     w('tab_abl.tex', '\n'.join(L) + '\n')

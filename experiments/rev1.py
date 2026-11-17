@@ -6,6 +6,8 @@ Phases, in the order of experiments/queue_rev1.sh:
   dump        GG-TL, GG-TH and CoTM, anchors 200 and 1000, seed 1, final protocol, clause masks saved (part B)
   abl_tune    CoTM clause feedback with the GG-TL readout: tuning of s (part A)
   abl_final   ablations of GG-TL at the anchors, seeds 1 to 3 (part A)
+  abl2_tune   CoTM clause feedback: Tm retuned at the selected s (addendum A2)
+  abl2_final  CoTM clause feedback at the setting selected over parts A and A2, seeds 1 to 3
   batch       CoTM with mini-batch size 1 at n = 200 (part C)
   ext_tune    one grid step beyond every boundary optimum of GG-TL and CoTM (part D)
   ext_final   final runs where the extended grid changes the selected setting (part D)
@@ -98,6 +100,43 @@ def abl_final_jobs():
                 for s in C.SEEDS:
                     jobs.append(our_cmd('gg_lintern', ds, a, g, s, rfile('abl', name, 'final', ds, a, g, s), es.FINAL,
                                         flags))
+    return [j for j in jobs if j]
+
+
+# ------------------------------------------------------------------ part A2: retuned margin of the CoTM clause feedback
+# Addendum A2 of PROTOCOL_rev1.md: Tm of fb_cotm retuned over the CoTM Tm grid at the s selected in part A.
+TM_GRID = (0.03, 0.1, 0.3, 1.0, 2.5, 5.0, 10.0, 20.0)
+
+
+def fbcotm2_cfgs(ds, a):
+    b = fbcotm_best(ds, a)
+    return [dict(s=b['s'], lr=b['lr'], H=0, Tm=t) for t in TM_GRID]
+
+
+def fbcotm2_best(ds, a):
+    """Best seed-1 TUNE setting over the part-A and part-A2 settings."""
+    cands = fbcotm_cfgs(ds, a) + fbcotm2_cfgs(ds, a)
+    return max(cands, key=lambda c: es.best_val(rfile('abl', 'fb_cotm', 'tune', ds, a, c, 1)))
+
+
+def abl2_tune_jobs():
+    jobs = []
+    for a in ANCHORS:
+        for ds in C.DS_ES:
+            for c in fbcotm2_cfgs(ds, a):
+                jobs.append(our_cmd('gg_lintern', ds, a, c, 1, rfile('abl', 'fb_cotm', 'tune', ds, a, c, 1), es.TUNE,
+                                    ['--fb', 'cotm']))
+    return [j for j in jobs if j]
+
+
+def abl2_final_jobs():
+    jobs = []
+    for a in ANCHORS:
+        for ds in C.DS_ES:
+            c = fbcotm2_best(ds, a)
+            for s in C.SEEDS:
+                jobs.append(our_cmd('gg_lintern', ds, a, c, s, rfile('abl', 'fb_cotm', 'final', ds, a, c, s), es.FINAL,
+                                    ['--fb', 'cotm']))
     return [j for j in jobs if j]
 
 
@@ -255,7 +294,8 @@ def tmucotm_final_jobs():
                              tfile('tmucotm', 'tmu_cotm', 'final', ds, 200, tmucotm_best(ds), s), TC.FINAL))]
 
 
-PHASES = dict(dump=dump_jobs, abl_tune=abl_tune_jobs, abl_final=abl_final_jobs, batch=batch_jobs,
+PHASES = dict(dump=dump_jobs, abl_tune=abl_tune_jobs, abl_final=abl_final_jobs, abl2_tune=abl2_tune_jobs,
+              abl2_final=abl2_final_jobs, batch=batch_jobs,
               ext_tune=ext_tune_jobs, ext_final=ext_final_jobs, seeds=seed_jobs, tm_ext_tune=tm_ext_tune_jobs,
               tm_ext_final=tm_ext_final_jobs, tmucotm_tune=tmucotm_tune_jobs, tmucotm_final=tmucotm_final_jobs)
 

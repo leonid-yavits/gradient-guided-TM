@@ -26,6 +26,16 @@ The opposite cell of the 2 x 2 design (GG clause feedback with the integer CoTM 
 needs a differentiable readout, and the CoTM readout has no probabilistic output without an additional, arbitrary
 logit scale.
 
+## Addendum A2 (17 Nov 2026, written after the part-A results and before the runs below)
+
+In part A, `fb_cotm` used T = Tm n with the Tm selected for the CoTM. The CoTM selects Tm for integer weights whose
+magnitude grows during training, whereas the ternary votes of the GG-TL readout satisfy |v| <= n. With Tm >= 1, the
+selection probabilities (T - v_y)/2T and (T + v_q)/2T then stay close to 1/2, so the part-A margin is not calibrated
+for the ternary readout. Tm of `fb_cotm` is therefore retuned over the CoTM grid {0.03, 0.1, 0.3, 1, 2.5, 5, 10, 20}
+at the s and learning rate selected in part A (TUNE, seed 1). The setting with the best validation macro F1 over the
+part-A and part-A2 settings is run with seeds 1 to 3 (FINAL). The paper reports this setting and states the part-A
+result. Code: `rev1.py` phases `abl2_tune` and `abl2_final`.
+
 ## B. Clause dumps (reviewer M6)
 
 GG-TL, GG-TH and CoTM at the anchors 200 and 1000, six datasets, seed 1, FINAL, with the include masks and readout
