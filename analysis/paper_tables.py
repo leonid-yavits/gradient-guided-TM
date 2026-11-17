@@ -251,7 +251,7 @@ for ds in C.DS_ES:
         nsig += int(p < 0.05 and o[0] < t[0])
         nbet += int(p < 0.05 and o[0] > t[0])
         L.append(f'{DSN[ds]} & {n} & {cfg["s"]}, {cfg["Tm"]} & {o[0]:.1f} $\\pm$ {o[1]:.1f} & '
-                 f'{t[0]:.1f} $\\pm$ {t[1]:.1f} & {p:.3f} \\\\')
+                 f'{t[0]:.1f} $\\pm$ {t[1]:.1f} & ' + ('$<$0.001' if p < 0.001 else f'{p:.3f}') + ' \\\\')
 L += [r'\bottomrule', r'\end{tabular}']
 w('tab_tmu.tex', '\n'.join(L) + '\n')
 mac('tmuchecked', str(nchk))
@@ -428,6 +428,369 @@ for ds in C.DS_ES:
         L.append(f'{DSN[ds]} & {n} & ' + ' & '.join(cells) + r' \\')
 L += [r'\bottomrule', r'\end{tabular}']
 w('tab_time.tex', '\n'.join(L) + '\n')
+
+# ================================================================== first revision (experiments/PROTOCOL_rev1.md)
+# Each analysis is written only when all its runs are finished; otherwise it is skipped with a note.
+sys.path.insert(0, os.path.join(HERE, '..', 'experiments'))
+import rev1 as RV                                         # noqa: E402
+from scipy import stats as ST                             # noqa: E402
+
+REV = os.path.join(C.ROOT, 'results_rev1')
+ANCH = (200, 1000)
+
+
+def runs(paths):
+    r = [R.at_best(p) for p in paths]
+    return r if r and all(r) else None
+
+
+def mv(r, key='test_f1'):
+    return np.array([q[key] for q in r], dtype=float) * 100
+
+
+def sig(a, b):
+    """'+' or '-' if a differs from b at p < 0.05 (Welch), else ''."""
+    p = R.welch(a, b)
+    return '' if not p < 0.05 else ('+' if a.mean() > b.mean() else '-')
+
+
+def fmt(v, mark=''):
+    s = f'{v.mean():.1f}'
+    return s + (f'$^{{{mark}}}$' if mark else '')
+
+
+def ours60(model, ds, n, seeds=C.SEEDS):
+    c = es.best_cfg(model, ds, n)
+    return runs([es.ofile('final', model, ds, n, c, s) for s in seeds])
+
+
+def note(x):
+    print('rev1:', x)
+
+
+# ---- F. linear reference models
+LIN = {}
+for ds in C.DS_ES:
+    for mdl in ('logreg', 'linsvm'):
+        try:
+            d = json.load(open(os.path.join(REV, 'linear', f'{mdl}_{ds}.json')))
+            LIN[(ds, mdl)] = (np.array([r['test']['f1'] for r in d['final']]) * 100,
+                              np.array([r['test']['bacc'] for r in d['final']]) * 100, d['best'])
+        except Exception:
+            pass
+if len(LIN) == 2 * len(C.DS_ES):
+    L = [r'\begin{tabular}{lrrrrl}', r'\toprule',
+         r'Dataset & LogReg & Lin.\ SVM & GG-TL & CoTM & Best clause model \\', r'\midrule']
+    above = 0
+    for ds in C.DS_ES:
+        best = max(((m, x) for m in ('gg_lintern', 'gg_linr', 'gg_hidtern', 'cotm', 'tmu_tm', 'fptm')
+                    for x in R.rows.get((ds, m), [])), key=lambda t: t[1]['f1'][0])
+        lin = max(LIN[(ds, 'logreg')][0].mean(), LIN[(ds, 'linsvm')][0].mean())
+        above += int(lin > best[1]['f1'][0])
+        L.append(f'{DSN[ds]} & {LIN[(ds, "logreg")][0].mean():.1f} & {LIN[(ds, "linsvm")][0].mean():.1f} & '
+                 f'{f1(ds, "gg_lintern", 2000)[0]:.1f} & {f1(ds, "cotm", 2000)[0]:.1f} & '
+                 f'{best[1]["f1"][0]:.1f} ({NAME[best[0]]}, $n={best[1]["n"]}$)' + r' \\')
+    L += [r'\bottomrule', r'\end{tabular}']
+    w('tab_linear.tex', '\n'.join(L) + '\n')
+    mac('linabove', str(above))
+else:
+    note(f'linear baselines incomplete ({len(LIN)} of {2 * len(C.DS_ES)})')
+
+# ---- A. ablations of GG-TL at the anchors (60-epoch FINAL runs of GG-TL as reference)
+ABLN = (('fb_cotm', 'CoTM clause feedback'), ('no_pfac', r'No factor $1-p_y$'),
+        ('no_mag', r'No magnitude $|g|$'), ('no_bias', 'No class offsets'))
+
+
+def abl_runs(name, ds, a):
+    if name == 'fb_cotm':
+        try:
+            c = RV.fbcotm_best(ds, a)
+        except Exception:
+            return None
+    else:
+        c = es.best_cfg('gg_lintern', ds, a)
+    return runs([RV.rfile('abl', name, 'final', ds, a, c, s) for s in C.SEEDS])
+
+
+ABL_OK = all(abl_runs(nm, ds, a) for nm, _ in ABLN for ds in C.DS_ES for a in ANCH)
+if ABL_OK:
+    L = [r'\begin{tabular}{l' + 'r' * len(C.DS_ES) + 'r}', r'\toprule',
+         r'Variant & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' & Cells \\', r'\midrule']
+    rows_ = [(nm, lab, lambda ds, a, nm=nm: abl_runs(nm, ds, a)) for nm, lab in ABLN]
+    rows_.append(('cotm', 'CoTM (reference)', lambda ds, a: ours60('cotm', ds, a)))
+    for nm, lab, get in rows_:
+        cells, W, Lo, N, D = [], 0, 0, 0, []
+        for ds in C.DS_ES:
+            d, wi, lo = [], 0, 0
+            for a in ANCH:
+                x, g = mv(get(ds, a)), mv(ours60('gg_lintern', ds, a))
+                d.append(x.mean() - g.mean())
+                s = sig(x, g)
+                wi, lo = wi + (s == '+'), lo + (s == '-')
+            cells.append(f'{np.mean(d):+.1f} ({wi}/{lo})'.replace('-', '$-$'))
+            W, Lo, N, D = W + wi, Lo + lo, N + len(d), D + d
+        mac(f'abl{nm}'.replace('_', '') + 'win', str(W))
+        mac(f'abl{nm}'.replace('_', '') + 'loss', str(Lo))
+        mac(f'abl{nm}'.replace('_', '') + 'mean', f'{np.mean(D):.1f}'.replace('-', ''))
+        L.append(f'{lab} & ' + ' & '.join(cells) + f' & {W}/{Lo} of {N}' + r' \\')
+        if nm == 'no_bias':
+            L.append(r'\midrule')
+    # CoTM clause feedback with the GG readout against our CoTM
+    W = Lo = 0
+    D = []
+    for ds in C.DS_ES:
+        for a in ANCH:
+            x, c = mv(abl_runs('fb_cotm', ds, a)), mv(ours60('cotm', ds, a))
+            D.append(x.mean() - c.mean())
+            s = sig(x, c)
+            W, Lo = W + (s == '+'), Lo + (s == '-')
+    mac('fbcotmvscotmwin', str(W))
+    mac('fbcotmvscotmloss', str(Lo))
+    mac('fbcotmvscotmmean', f'{np.mean(D):.1f}'.replace('-', ''))
+    mac('fbcotmvscotmpos', str(sum(d > 0 for d in D)))
+    L += [r'\bottomrule', r'\end{tabular}']
+    w('tab_abl.tex', '\n'.join(L) + '\n')
+else:
+    note('ablations incomplete')
+
+# ---- C and G. CoTM checks at n = 200
+B1 = {ds: runs([RV.rfile('batch1', 'cotm', 'final', ds, 200, es.best_cfg('cotm', ds, 200), s) for s in C.SEEDS])
+      for ds in RV.BATCH_DS}
+TCO = {}
+for ds in C.DS_ES:
+    try:
+        TCO[ds] = runs([RV.tfile('tmucotm', 'tmu_cotm', 'final', ds, 200, RV.tmucotm_best(ds), s) for s in C.SEEDS])
+    except Exception:
+        TCO[ds] = None
+if all(B1.values()):
+    for ds in RV.BATCH_DS:
+        x, c = mv(B1[ds]), mv(ours60('cotm', ds, 200))
+        mac(f'bone{ds}', f'{x.mean():.1f}')
+        mac(f'bsixtyfour{ds}', f'{c.mean():.1f}')
+        mac(f'bonep{ds}', f'{R.welch(x, c):.2f}')
+        mac(f'boneepoch{ds}', f'{np.mean([q["sec"] for q in B1[ds]]):.0f}' if 'sec' in B1[ds][0] else '--')
+    mac('bonesig', str(sum(sig(mv(B1[ds]), mv(ours60('cotm', ds, 200))) != '' for ds in RV.BATCH_DS)))
+else:
+    note('batch-1 runs incomplete')
+if all(TCO.values()):
+    L = [r'\begin{tabular}{lrrrrl}', r'\toprule',
+         r'Dataset & GG-TL & CoTM (ours) & TMU CoTM, tuned & TMU CoTM, our setting & Tuned setting \\',
+         r'\midrule']
+    W = Lo = 0
+    for ds in C.DS_ES:
+        g, c, t = mv(ours60('gg_lintern', ds, 200)), mv(ours60('cotm', ds, 200)), mv(TCO[ds])
+        st = sig(t, c)
+        W, Lo = W + (st == '+'), Lo + (st == '-')
+        bc = RV.tmucotm_best(ds)
+        _o = tmu_runs('check', 'tmu_cotm', ds, 200, TC.ours_cotm_cfg(ds, 200))
+        old = R.ms(_o, 'test_f1')[0] if _o else float('nan')
+        L.append(f'{DSN[ds]} & {g.mean():.1f} & {c.mean():.1f} & {fmt(t, st)} & {old:.1f} & '
+                 f'$s={bc["s"]:g}$, $T/n={bc["Tm"]:g}$' + r' \\')
+    L += [r'\bottomrule', r'\end{tabular}']
+    w('tab_tmucotm.tex', '\n'.join(L) + '\n')
+    mac('tcowin', str(W))
+    mac('tcoloss', str(Lo))
+    mac('tcoggwin', str(sum(sig(mv(ours60('gg_lintern', ds, 200)), mv(TCO[ds])) == '+' for ds in C.DS_ES)))
+    mac('tcoggloss', str(sum(sig(mv(ours60('gg_lintern', ds, 200)), mv(TCO[ds])) == '-' for ds in C.DS_ES)))
+else:
+    note('tuned TMU CoTM incomplete')
+
+# ---- D. one step beyond boundary optima
+EXT_OK = True
+chg, ext_rows = {}, []
+for m in RV.EXT_MODELS + ('tmu_tm',):
+    chg[m] = 0
+    for ds in C.DS_ES:
+        for a in ANCH:
+            b = RV.tm_ext_best(ds, a) if m == 'tmu_tm' else RV.ext_best(m, ds, a)
+            if b is None:
+                EXT_OK = False
+                continue
+            base = TC.best_cfg('tmu_tm', ds, a) if m == 'tmu_tm' else es.best_cfg(m, ds, a)
+            chg[m] += int(b != base)
+if EXT_OK:
+    for m, k in chg.items():
+        mac(f'extchg{m}'.replace('_', ''), str(k))
+    # final runs of changed settings: difference to the pre-registered setting, per budget
+    for m in RV.EXT_MODELS + ('tmu_tm',):
+        for ds in C.DS_ES:
+            for n in C.BUDGETS:
+                if m == 'tmu_tm':
+                    b, base = RV.tm_ext_best(ds, C.anchor(n)), TC.best_cfg('tmu_tm', ds, n)
+                    if b == base or (ds, n) in TM_DUP:
+                        continue
+                    x = runs([RV.tfile('ext', 'tmu_tm', 'final', ds, n, b, s) for s in C.SEEDS])
+                    y = tmu_runs('final', 'tmu_tm', ds, n, base)
+                else:
+                    b, base = RV.ext_best(m, ds, C.anchor(n)), es.best_cfg(m, ds, n)
+                    if b == base:
+                        continue
+                    x = runs([RV.rfile('ext', m, 'final', ds, n, b, s) for s in C.SEEDS])
+                    y = ours60(m, ds, n)
+                if x is None or not y:
+                    EXT_OK = False
+                    continue
+                ext_rows.append((m, ds, n, mv(x), mv(y)))
+if EXT_OK:
+    for m in RV.EXT_MODELS + ('tmu_tm',):
+        e = [r for r in ext_rows if r[0] == m]
+        mac(f'extcells{m}'.replace('_', ''), str(len(e)))
+        mac(f'extmean{m}'.replace('_', ''), f'{np.mean([r[3].mean() - r[4].mean() for r in e]):+.1f}' if e else '0')
+        mac(f'extup{m}'.replace('_', ''), str(sum(sig(r[3], r[4]) == '+' for r in e)))
+        mac(f'extdown{m}'.replace('_', ''), str(sum(sig(r[3], r[4]) == '-' for r in e)))
+        mac(f'extmax{m}'.replace('_', ''), f'{max([r[3].mean() - r[4].mean() for r in e], default=0):.1f}')
+
+    # GG-TL against CoTM and TM with the extended settings wherever they changed
+    def ext_or_base(m, ds, n):
+        r = next((q for q in ext_rows if q[:3] == (m, ds, n)), None)
+        if r is not None:
+            return r[3]
+        if m == 'tmu_tm':
+            x = R.get(ds, 'tmu_tm', n)
+            return None if x is None else R.ms(x['r'], 'test_f1')[2]
+        return mv(ours60(m, ds, n))
+    for b in ('cotm', 'tmu_tm'):
+        W = Lo = N = 0
+        for ds in C.DS_ES:
+            for n in C.BUDGETS:
+                if b == 'tmu_tm' and R.get(ds, 'tmu_tm', n) is None:
+                    continue
+                x, y = ext_or_base('gg_lintern', ds, n), ext_or_base(b, ds, n)
+                s = sig(x, y)
+                W, Lo, N = W + (s == '+'), Lo + (s == '-'), N + 1
+        mac(f'extgg{b}win'.replace('_', ''), str(W))
+        mac(f'extgg{b}loss'.replace('_', ''), str(Lo))
+        mac(f'extgg{b}n'.replace('_', ''), str(N))
+else:
+    note('grid extension incomplete')
+
+# ---- E. seeds 2 to 8
+SEED_EVAL = (2, 3) + RV.NEW_SEEDS
+
+
+def seed_runs(model, ds, n):
+    c = es.best_cfg(model, ds, n)
+    ext = RV.has_ext(model, ds, n, c)
+    ph = 'ext' if ext else 'final'
+    old = [es.ofile(ph, model, ds, n, c, s) for s in (2, 3)]
+    new = [RV.rfile('seeds', model, ph, ds, n, c, s) for s in RV.NEW_SEEDS]
+    return runs(old + new)
+
+
+SR = {(m, ds, n): seed_runs(m, ds, n) for m in ('gg_lintern', 'cotm') for ds in C.DS_ES for n in C.BUDGETS}
+if all(SR.values()):
+    L = [r'\begin{tabular}{l' + 'r' * len(C.DS_ES) + 'rrr}', r'\toprule',
+         r'Metric & ' + ' & '.join(DSN[d] for d in C.DS_ES) +
+         r' & Holm & $p_\mathrm{W}$, cells & $p_\mathrm{W}$, datasets \\', r'\midrule']
+    for key, lab in MET:
+        mk = {'test_f1': 'mf', 'test_bacc': 'bacc', 'test_acc': 'acc'}[key]
+        P, D, cellsd = [], [], {}
+        for ds in C.DS_ES:
+            for n in C.BUDGETS:
+                a, b = mv(SR[('gg_lintern', ds, n)], key), mv(SR[('cotm', ds, n)], key)
+                P.append(R.welch(a, b))
+                D.append(a.mean() - b.mean())
+                cellsd.setdefault(ds, []).append(len(P) - 1)
+        P, D = np.array(P), np.array(D)
+        order = np.argsort(P)                             # Holm step-down over the 36 cells
+        rej = np.zeros(len(P), bool)
+        for i, j in enumerate(order):
+            if P[j] <= 0.05 / (len(P) - i):
+                rej[j] = True
+            else:
+                break
+        W, Lo = int(np.sum(rej & (D > 0))), int(np.sum(rej & (D < 0)))
+        dsm = [D[cellsd[ds]].mean() for ds in C.DS_ES]
+        pw_c = ST.wilcoxon(D).pvalue
+        pw_d = ST.wilcoxon(dsm).pvalue
+        cells = [f'{D[cellsd[ds]].mean():+.1f} ({int(np.sum(rej[cellsd[ds]] & (D[cellsd[ds]] > 0)))}/'
+                 f'{int(np.sum(rej[cellsd[ds]] & (D[cellsd[ds]] < 0)))})'.replace('-', '$-$') for ds in C.DS_ES]
+        L.append(f'{lab} & ' + ' & '.join(cells) + f' & {W}/{Lo} & {pw_c:.1g} & {pw_d:.2f}'.replace('e-0', 'e-')
+                 + r' \\')
+        mac(f'seed{mk}holmwin', str(W))
+        mac(f'seed{mk}holmloss', str(Lo))
+        mac(f'seed{mk}pos', str(int(np.sum(D > 0))))
+        mac(f'seed{mk}rawwin', str(int(np.sum((P < 0.05) & (D > 0)))))
+        mac(f'seed{mk}rawloss', str(int(np.sum((P < 0.05) & (D < 0)))))
+        e = f'{pw_c:.1e}'.split('e')
+        mac(f'seed{mk}pwcells', f'{float(e[0]):.1f}\\times 10^{{{int(e[1])}}}')
+        mac(f'seed{mk}pwds', f'{pw_d:.3f}')
+        mac(f'seed{mk}meandiff', f'{D.mean():.1f}')
+        if key == 'test_f1':
+            # 95% confidence interval of the mean difference per cell (Welch); smallest lower bound reported
+            lo = []
+            for ds in C.DS_ES:
+                for n in C.BUDGETS:
+                    a, b = mv(SR[('gg_lintern', ds, n)]), mv(SR[('cotm', ds, n)])
+                    va, vb = a.var(ddof=1) / len(a), b.var(ddof=1) / len(b)
+                    df = (va + vb) ** 2 / (va ** 2 / (len(a) - 1) + vb ** 2 / (len(b) - 1))
+                    lo.append(a.mean() - b.mean() - ST.t.ppf(0.975, df) * np.sqrt(va + vb))
+            mac('seedcipos', str(int(np.sum(np.array(lo) > 0))))
+    L += [r'\bottomrule', r'\end{tabular}']
+    w('tab_seeds.tex', '\n'.join(L) + '\n')
+else:
+    note(f'seeds incomplete ({sum(bool(v) for v in SR.values())} of {len(SR)} cells)')
+
+# ---- B. clause dumps: plain and negated literals, nonzero votes, CoTM weight range
+DUMP = {}
+for m in ('gg_lintern', 'cotm', 'gg_hidtern'):
+    for ds in C.DS_ES:
+        for a in ANCH:
+            p = RV.rfile('dump', m, 'final', ds, a, es.best_cfg(m, ds, a), 1).replace('.json', '.npz')
+            if os.path.exists(p) and R.at_best(p.replace('.npz', '.json')):
+                DUMP[(m, ds, a)] = np.load(p)
+if len(DUMP) == 3 * len(C.DS_ES) * len(ANCH):
+    L = [r'\begin{tabular}{lr' + 'r' * len(C.DS_ES) + '}', r'\toprule',
+         r'Quantity & $n$ & ' + ' & '.join(DSN[d] for d in C.DS_ES) + r' \\', r'\midrule']
+    negfrac = {}
+    for m in ('gg_lintern', 'cotm'):
+        for a in ANCH:
+            cells = []
+            for ds in C.DS_ES:
+                z = DUMP[(m, ds, a)]
+                inc = np.unpackbits(z['include'], axis=1)[:, :int(z['n_lit'])]
+                o = inc.shape[1] // 2
+                pl, ng = inc[:, :o].sum(1), inc[:, o:].sum(1)
+                negfrac[(m, ds, a)] = ng.sum() / max(1, (pl + ng).sum())
+                cells.append(f'{pl.mean():.1f} / {ng.mean():.1f}')
+            L.append((f'{NAME[m]}: plain / negated literals' if a == ANCH[0] else '') + f' & {a} & ' +
+                     ' & '.join(cells) + r' \\')
+    for a in ANCH:
+        cells = []
+        for ds in C.DS_ES:
+            Wt = DUMP[('gg_lintern', ds, a)]['W']
+            cells.append(f'{(Wt != 0).sum(0).mean():.1f}')
+        L.append(('GG-TL: nonzero votes per clause' if a == ANCH[0] else '') + f' & {a} & ' + ' & '.join(cells) +
+                 r' \\')
+    for a in ANCH:
+        cells = []
+        for ds in C.DS_ES:
+            Wc = DUMP[('cotm', ds, a)]['W']
+            r_ = int(np.abs(Wc).max())
+            cells.append(f'{r_} ({int(np.ceil(np.log2(2 * r_ + 1)))})')
+        L.append(('CoTM: largest $|w|$ (bits)' if a == ANCH[0] else '') + f' & {a} & ' + ' & '.join(cells) + r' \\')
+    L += [r'\bottomrule', r'\end{tabular}']
+    w('tab_dump.tex', '\n'.join(L) + '\n')
+    gneg = [negfrac[('gg_lintern', ds, a)] for ds in C.DS_ES for a in ANCH]
+    cneg = [negfrac[('cotm', ds, a)] for ds in C.DS_ES for a in ANCH]
+    mac('dumpggnegmin', f'{100 * min(gneg):.0f}')
+    mac('dumpggnegmax', f'{100 * max(gneg):.0f}')
+    mac('dumpcotmnegmin', f'{100 * min(cneg):.0f}')
+    mac('dumpcotmnegmax', f'{100 * max(cneg):.0f}')
+    bits = [int(np.ceil(np.log2(2 * int(np.abs(DUMP[('cotm', ds, a)]['W']).max()) + 1))) for ds in C.DS_ES
+            for a in ANCH]
+    mac('dumpcotmbitsmin', str(min(bits)))
+    mac('dumpcotmbitsmax', str(max(bits)))
+    # the dump runs repeat the seed-1 FINAL runs: largest deviation of the best validation F1 from the originals
+    dev = []
+    for (m, ds, a) in DUMP:
+        x = R.at_best(RV.rfile('dump', m, 'final', ds, a, es.best_cfg(m, ds, a), 1))
+        y = R.at_best(es.ofile('final', m, ds, a, es.best_cfg(m, ds, a), 1))
+        if x and y:
+            dev.append(abs(x['val_f1'] - y['val_f1']) * 100)
+    mac('dumpdev', f'{max(dev):.2f}' if dev else '--')
+else:
+    note(f'dumps incomplete ({len(DUMP)} of {3 * len(C.DS_ES) * len(ANCH)})')
 
 # ------------------------------------------------------------------ macros
 w('results_macros.tex', '%% Generated by gg-th/analysis/paper_tables.py. Do not edit by hand.\n' +
