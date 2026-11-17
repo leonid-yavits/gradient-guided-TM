@@ -481,18 +481,21 @@ for ds in C.DS_ES:
 if len(LIN) == 2 * len(C.DS_ES):
     L = [r'\begin{tabular}{lrrrrl}', r'\toprule',
          r'Dataset & LogReg & Lin.\ SVM & GG-TL & CoTM & Best clause model \\', r'\midrule']
-    above = 0
+    above, gap = 0, []
     for ds in C.DS_ES:
         best = max(((m, x) for m in ('gg_lintern', 'gg_linr', 'gg_hidtern', 'cotm', 'tmu_tm', 'fptm')
                     for x in R.rows.get((ds, m), [])), key=lambda t: t[1]['f1'][0])
         lin = max(LIN[(ds, 'logreg')][0].mean(), LIN[(ds, 'linsvm')][0].mean())
         above += int(lin > best[1]['f1'][0])
+        gap.append(lin - f1(ds, 'gg_lintern', 2000)[0])
         L.append(f'{DSN[ds]} & {LIN[(ds, "logreg")][0].mean():.1f} & {LIN[(ds, "linsvm")][0].mean():.1f} & '
                  f'{f1(ds, "gg_lintern", 2000)[0]:.1f} & {f1(ds, "cotm", 2000)[0]:.1f} & '
                  f'{best[1]["f1"][0]:.1f} ({NAME[best[0]]}, $n={best[1]["n"]}$)' + r' \\')
     L += [r'\bottomrule', r'\end{tabular}']
     w('tab_linear.tex', '\n'.join(L) + '\n')
     mac('linabove', str(above))
+    mac('linggmin', f'{min(gap):.1f}')
+    mac('linggmax', f'{max(gap):.1f}')
 else:
     note(f'linear baselines incomplete ({len(LIN)} of {2 * len(C.DS_ES)})')
 
