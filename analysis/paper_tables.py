@@ -536,6 +536,7 @@ if ABL_OK:
         mac(f'abl{nm}'.replace('_', '') + 'win', str(W))
         mac(f'abl{nm}'.replace('_', '') + 'loss', str(Lo))
         mac(f'abl{nm}'.replace('_', '') + 'mean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, variant - GG-TL
+        mac(f'abl{nm}'.replace('_', '') + 'abs', f'{abs(np.mean(D)):.1f}')
         L.append(f'{lab} & ' + ' & '.join(cells) + f' & {W}/{Lo} of {N}' + r' \\')
         if nm == 'no_bias':
             L.append(r'\midrule')
@@ -559,6 +560,8 @@ if ABL_OK:
     mac('fbcotmvscotmloss', str(Lo))
     mac('fbcotmvscotmmean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, fb_cotm - CoTM
     mac('fbcotmvscotmpos', str(sum(d > 0 for d in D)))
+    mac('fbcotmvscotmabs', f'{abs(np.mean(D)):.1f}')
+    mac('ablfbcotmsone', str(sum(RV.fbcotm2_best(ds, a)['s'] == 1.5 for ds in C.DS_ES for a in ANCH)))
     L += [r'\bottomrule', r'\end{tabular}']
     w('tab_abl.tex', '\n'.join(L) + '\n')
 else:
