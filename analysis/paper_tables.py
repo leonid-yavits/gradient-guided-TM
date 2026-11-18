@@ -581,7 +581,7 @@ if all(B1.values()):
         x, c = mv(B1[ds]), mv(ours60('cotm', ds, 200))
         mac(f'bone{ds}', f'{x.mean():.1f}')
         mac(f'bsixtyfour{ds}', f'{c.mean():.1f}')
-        mac(f'bonep{ds}', f'{R.welch(x, c):.2f}')
+        pv = R.welch(x, c); mac(f'bonep{ds}', '$<$0.01' if pv < 0.01 else f'{pv:.2f}')
         mac(f'boneepoch{ds}', f'{np.mean([q["sec"] for q in B1[ds]]):.0f}' if 'sec' in B1[ds][0] else '--')
     mac('bonesig', str(sum(sig(mv(B1[ds]), mv(ours60('cotm', ds, 200))) != '' for ds in RV.BATCH_DS)))
 else:
