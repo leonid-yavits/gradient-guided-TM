@@ -503,11 +503,19 @@ else:
     note(f'linear baselines incomplete ({len(LIN)} of {2 * len(C.DS_ES)})')
 
 # ---- A. ablations of GG-TL at the anchors (60-epoch FINAL runs of GG-TL as reference)
-ABLN = (('fb_cotm', 'CoTM clause feedback'), ('no_pfac', r'No factor $1-p_y$'),
+ABLN = (('fb_cotm', 'CoTM clause feedback'), ('fb_cotm_s', r'CoTM clause feedback, $s\ge 1$'),
+        ('fb_cotm_z', 'CoTM clause feedback, zero weights skipped'), ('no_pfac', r'No factor $1-p_y$'),
         ('no_mag', r'No magnitude $|g|$'), ('no_bias', 'No class offsets'))
 
 
 def abl_runs(name, ds, a):
+    if name in ('fb_cotm_s', 'fb_cotm_z'):   # addendum A3: s = 1 added (fb_cotm), zero weights skipped (fb_cotm0)
+        try:
+            c = RV.fbcotm3_best(ds, a) if name == 'fb_cotm_s' else RV.fbcotm0_best(ds, a)
+        except Exception:
+            return None
+        return runs([RV.rfile('abl', 'fb_cotm' if name == 'fb_cotm_s' else 'fb_cotm0', 'final', ds, a, c, s)
+                     for s in C.SEEDS])
     if name in ('fb_cotm', 'fb_cotm_a'):     # fb_cotm: selected over parts A and A2; fb_cotm_a: part A only
         try:
             c = RV.fbcotm2_best(ds, a) if name == 'fb_cotm' else RV.fbcotm_best(ds, a)
@@ -550,20 +558,29 @@ if ABL_OK:
     # Tm of the selected fb_cotm setting relative to the Tm of the CoTM
     tms = [(RV.fbcotm2_best(ds, a)['Tm'], es.best_cfg('cotm', ds, a)['Tm']) for ds in C.DS_ES for a in ANCH]
     mac('ablfbcotmTmsmaller', str(sum(x < y for x, y in tms)))
-    # CoTM clause feedback with the GG readout against our CoTM
-    W = Lo = 0
-    D = []
-    for ds in C.DS_ES:
-        for a in ANCH:
-            x, c = mv(abl_runs('fb_cotm', ds, a)), mv(ours60('cotm', ds, a))
-            D.append(x.mean() - c.mean())
-            s = sig(x, c)
-            W, Lo = W + (s == '+'), Lo + (s == '-')
-    mac('fbcotmvscotmwin', str(W))
-    mac('fbcotmvscotmloss', str(Lo))
-    mac('fbcotmvscotmmean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, fb_cotm - CoTM
-    mac('fbcotmvscotmpos', str(sum(d > 0 for d in D)))
-    mac('fbcotmvscotmabs', f'{abs(np.mean(D)):.1f}')
+    # CoTM clause feedback with the GG readout against our CoTM, and the share of the GG-TL - CoTM difference removed
+    DG = np.mean([mv(ours60('gg_lintern', ds, a)).mean() - mv(ours60('cotm', ds, a)).mean()
+                  for ds in C.DS_ES for a in ANCH])
+    for nm in ('fb_cotm', 'fb_cotm_s', 'fb_cotm_z'):
+        k = nm.replace('_', '')
+        W = Lo = 0
+        D, DV = [], []
+        for ds in C.DS_ES:
+            for a in ANCH:
+                x, c = mv(abl_runs(nm, ds, a)), mv(ours60('cotm', ds, a))
+                D.append(x.mean() - c.mean())
+                DV.append(x.mean() - mv(ours60('gg_lintern', ds, a)).mean())
+                s = sig(x, c)
+                W, Lo = W + (s == '+'), Lo + (s == '-')
+        mac(f'{k}vscotmwin', str(W))
+        mac(f'{k}vscotmloss', str(Lo))
+        mac(f'{k}vscotmmean', f'{np.mean(D):+.1f}'.replace('-', '$-$'))  # signed, variant - CoTM
+        mac(f'{k}vscotmpos', str(sum(d > 0 for d in D)))
+        mac(f'{k}vscotmabs', f'{abs(np.mean(D)):.1f}')
+        mac(f'{k}share', f'{100 * -np.mean(DV) / DG:.0f}')                # % of the GG-TL - CoTM difference removed
+    mac('ablfbcotmzsone', str(sum(RV.fbcotm0_best(ds, a)['s'] == 1 for ds in C.DS_ES for a in ANCH)))
+    mac('ablfbcotmzsedge', str(sum(RV.fbcotm0_best(ds, a)['s'] in (1, 20) for ds in C.DS_ES for a in ANCH)))
+    mac('ablfbcotmschg', str(sum(RV.fbcotm3_best(ds, a) != RV.fbcotm2_best(ds, a) for ds in C.DS_ES for a in ANCH)))
     mac('ablfbcotmsone', str(sum(RV.fbcotm2_best(ds, a)['s'] == 1.5 for ds in C.DS_ES for a in ANCH)))
     L += [r'\bottomrule', r'\end{tabular}']
     w('tab_abl.tex', '\n'.join(L) + '\n')
