@@ -796,6 +796,12 @@ if len(DUMP) == 3 * len(C.DS_ES) * len(ANCH):
     mac('dumpggnegmax', f'{100 * max(gneg):.0f}')
     mac('dumpcotmnegmin', f'{100 * min(cneg):.0f}')
     mac('dumpcotmnegmax', f'{100 * max(cneg):.0f}')
+    for _m, _k in (('gg_lintern', 'gg'), ('cotm', 'cotm')):
+        _v = [negfrac[(_m, 'alerce', a)] for a in ANCH]
+        mac(f'dump{_k}negalcmin', f'{100 * min(_v):.0f}')
+        mac(f'dump{_k}negalcmax', f'{100 * max(_v):.0f}')
+    mac('dumpggzeromin', f'{100 * (1 - max(votefrac)):.0f}')
+    mac('dumpggzeromax', f'{100 * (1 - min(votefrac)):.0f}')
     bits = [int(np.ceil(np.log2(2 * int(np.abs(DUMP[('cotm', ds, a)]['W']).max()) + 1))) for ds in C.DS_ES
             for a in ANCH]
     mac('dumpggvotemin', f'{100 * min(votefrac):.0f}')

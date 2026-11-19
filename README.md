@@ -29,26 +29,41 @@ The study in `results/` (fixed epochs, WOS and ALeRCE only) is an earlier pilot 
 ## Repository layout
 
 ```
-ggth/tm.py                 clause bank, CoTM readout, GG-linear and GG-TH readouts
-ggth/data.py               prepared splits, class-balanced sampling, metrics
-train.py                   single training run (one JSON log per run, one record per epoch)
-fptm/fptm_run.jl           driver for the unmodified FPTM reference implementation (baseline)
-fptm/export_bin.py         exports the splits to raw binaries for the Julia driver
-experiments/config.py      datasets, budgets, search grids, result paths, selection rules
-experiments/run.py         ablation, tuning and final runs (skips completed runs)
-analysis/report.py         tables (results/summary.md) and figure (figures/fig_budget.pdf)
-results/                   all run logs used in the paper (ablation, tuning, final)
-tests/check_reproduction.py  bit-exact check of three stored runs
+ggth/tm.py                    clause bank, CoTM readout, GG-linear, GG-TL and GG-TH readouts
+ggth/data.py                  prepared splits, class-balanced sampling, metrics
+train.py                      single training run (one JSON log per run, one record per epoch)
+data_prep/prep_text.py        binary bag-of-words encodings of R52, Sector, RCV1 and 20NG
+fptm/fptm_run.jl              driver for the unmodified FPTM reference implementation (baseline)
+fptm/export_bin.py            exports the splits to raw binaries for the Julia driver
+experiments/config.py         datasets, budgets, search grids, result paths
+experiments/es.py             main study: tuning, final and extended runs with early stopping (results_es/)
+experiments/tmu_check.py      TMU coalesced classifier and multi-class TM (results_tmu/)
+experiments/rev1.py           revision checks: dump, ablations, batch size, grid edges, seeds, tuned TMU CoTM (results_rev1/)
+experiments/linear_baselines.py  logistic regression and linear SVM (results_rev1/linear/)
+experiments/queue_rev1.sh     runs all revision phases in order
+analysis/paper_tables.py      every table, macro and figure of the paper, from the stored logs
+results_es/, results_tmu/, results_rev1/   all run logs used in the paper
+results/, analysis/report.py, experiments/run.py   earlier pilot (fixed epochs, WOS and ALeRCE), superseded
+tests/check_reproduction.py   bit-exact check of three stored pilot runs
 ```
 
 ## Installation
 
 ```bash
 git clone https://github.com/leonid-yavits/gradient-guided-TM.git && cd gradient-guided-TM
-python -m pip install -r requirements.txt   # tested with Python 3.13, NumPy 2.5, SciPy 1.18, Matplotlib 3.11
+git checkout es-study
+python -m pip install -r requirements.txt   # tested with Python 3.13, NumPy 2.5, SciPy 1.18, scikit-learn 1.9
 ```
 
-**For the FPTM baseline only:**
+**For the TMU baselines:** a separate environment with TMU installed from GitHub at the commit used in the paper
+(the PyPI release 0.7.1 fails under NumPy 2). Point `TMU_PYTHON` to its interpreter.
+
+```bash
+python -m venv venv_tmu && venv_tmu/bin/pip install "git+https://github.com/cair/tmu.git@17f17231b944d1aa7ae1a36541ba0bc9f0e52bc4"
+export TMU_PYTHON=$PWD/venv_tmu/bin/python
+```
+
+**For the FPTM baseline:**
 - Julia (tested with 1.13).
 - The FPTM reference implementation, pinned to the commit used in the paper:
 
@@ -59,43 +74,41 @@ git -C fptm/FuzzyPatternTM checkout e25a51e1ad6778f503f8725b9d98b60b4904e68b
 
 ## Data
 
-The experiments use the prepared TreeTM splits of two public datasets:
-- **WOS:** Web of Science WOS-46985, Kowsari *et al.*, ICMLA 2017, Mendeley Data, DOI 10.17632/9rw3vkcfy4.6.
-- **ALeRCE:** the ALeRCE light-curve classifier labeled set, Sánchez-Sáez *et al.*, AJ 2021, Zenodo, DOI 10.5281/zenodo.4279623.
+Six public datasets, all in the prepared format of `ggth/data.py` (`<GGTH_DATA>/<name>/{prepared.npz,meta.json}`):
 
-Download them from the [`data-v1` release](https://github.com/leonid-yavits/gradient-guided-TM/releases/tag/data-v1) (`gg-th_datasets.zip`, CC BY 4.0) and unzip into `data/`. See [`data/README.md`](data/README.md). Place them as `data/TreeTM_datasets/{wos,alerce}/{prepared.npz,meta.json}`, or point `GGTH_DATA` to their location.
+- **WOS** and **ALeRCE:** prepared TreeTM splits, from the [`data-v1` release](https://github.com/leonid-yavits/gradient-guided-TM/releases/tag/data-v1) (`gg-th_datasets.zip`, CC BY 4.0). See [`data/README.md`](data/README.md).
+- **R52, Sector, RCV1, 20NG:** built with `data_prep/prep_text.py` from the NLTK Reuters-21578 corpus and the LIBSVM
+  multiclass files. Checksums of the downloaded files are in `data_prep/SHA256SUMS_text`, and the encoding is described
+  in [`experiments/PROTOCOL_text.md`](experiments/PROTOCOL_text.md).
+
+Set `GGTH_DATA` to the directory that holds the six dataset folders.
 
 ## Reproducing the paper
 
 ```bash
-python tests/check_reproduction.py            # about 1 min: bit-exact match with stored logs
-python analysis/report.py                     # tables and figure from the stored logs (no training)
+python analysis/paper_tables.py <out_dir>     # all tables, macros and Fig. 2 from the stored logs (no training)
 
-# Full re-run. Each phase skips runs whose log already exists, so move results/ aside to start fresh.
-python fptm/export_bin.py wos alerce          # binaries for the Julia driver (data/bin)
-python experiments/run.py ablation --workers 2
-python experiments/run.py tune     --workers 2
-python experiments/run.py final    --workers 2
-python analysis/report.py
+# Full re-run. Every phase skips runs whose log already exists, so move the results_* folders aside to start fresh.
+python fptm/export_bin.py wos alerce r52 sector rcv1 news20   # binaries for the Julia driver
+python experiments/es.py all --workers 2      # tune and final
+python experiments/es.py ext --workers 2      # runs whose best epoch fell near the cap
+python experiments/tmu_check.py tune  --workers 2
+python experiments/tmu_check.py final --workers 2
+experiments/queue_rev1.sh                     # revision checks; edit the paths at its top first
 ```
 
-**Protocol:**
-- **Sampling:** each epoch draws P samples per class, with P = 300 for WOS and 4000 for ALeRCE.
-- **Selection:** hyperparameters are selected on validation macro F1 after 5 epochs with seed 1.
-- **Reporting:** the final runs train for 20 epochs with seeds 1 to 3 and report test metrics after epoch 20. The test split is never used for selection.
-- **Compute:** the full re-run takes several hours on two CPU cores. The GG-TH code is plain NumPy, single-threaded per run.
-
-A single run:
-
-```bash
-python train.py --dataset wos --readout gg_hidtern --clauses 200 --s 10 --lr 3e-3 --H 256 --P 300 --epochs 20 --seed 1 --out run.json
-```
+**Protocol** (details in the protocol files listed above):
+- **Sampling:** each epoch draws P samples per class (class-balanced).
+- **Tuning:** seed 1, up to 20 epochs, patience 5, selection on validation macro F1, at the anchors 200 and 1000 clauses.
+- **Final runs:** seeds 1 to 3, up to 60 epochs, patience 10, test metrics at the best validation epoch. The test split
+  is never used for selection.
+- **Compute:** the full re-run takes several days on two CPU cores. The TMU coalesced classifier on WOS dominates.
 
 ## Citation
 
 ```bibtex
-@unpublished{yavits2026ggth,
-  title  = {Gradient-Guided {T}setlin Machines with a Ternary Hidden Readout for Many-Class Classification under Tight Clause Budgets},
+@unpublished{yavits2026ggcotm,
+  title  = {Gradient-Guided Clause Feedback for Coalesced {T}setlin Machines},
   author = {Yavits, Leonid},
   note   = {Submitted to Expert Systems with Applications. Code: https://github.com/leonid-yavits/gradient-guided-TM},
   year   = {2026}
