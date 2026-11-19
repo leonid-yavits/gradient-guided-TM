@@ -8,6 +8,7 @@ results_macros.tex and fig_budget.{pdf,png}. Every number in these files is comp
 """
 import io
 import contextlib
+import glob
 import json
 import os
 import sys
@@ -259,6 +260,8 @@ mac('tmuoursworse', str(nsig))
 mac('tmuoursbetter', str(nbet))
 # TMU runs resumed from a checkpoint after an interruption
 _tj = [os.path.join(dp, f) for dp, _, fs in os.walk(TC.RES) for f in fs if f.endswith('.json')]
+_tj += [f for f in glob.glob(os.path.join(C.ROOT, 'results_rev1', '**', '*.json'), recursive=True)
+        if str(json.load(open(f)).get('model', '')).startswith('tmu_') and json.load(open(f)).get('done')]
 mac('tmuruns', str(len(_tj)))
 mac('tmuresumed', str(sum(bool(json.load(open(f)).get('resumed_after')) for f in _tj)))
 
