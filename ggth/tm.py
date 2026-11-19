@@ -208,8 +208,8 @@ class GGReadout:
             self.opt.step([gW1, gb1, gW2, gb2, ga1, ga2])
             self.a1[0] = max(self.a1[0], 1e-4)
             self.a2[0] = max(self.a2[0], 1e-4)
-        if self.fb == 'cotm':
-            return self.cotm_feedback(c, y, cache[0], cache[1])
+        if self.fb in ('cotm', 'cotm0'):
+            return self.cotm_feedback(c, y, cache[0], cache[1], skip_zero=self.fb == 'cotm0')
         # GG feedback: g = d log p_y / dc = -B * dc
         g = -dc * B
         d = np.ones(B, np.float32) if self.no_pfac else 1.0 - p[np.arange(B), y]
@@ -220,8 +220,11 @@ class GGReadout:
         return sel * (g > 0), sel * (g < 0)
 
 
-    def cotm_feedback(self, c, y, Wt, v):
-        """Clause feedback of the CoTM rule (CoTMReadout.train_step) on the ternary votes; weights are not changed."""
+    def cotm_feedback(self, c, y, Wt, v, skip_zero=False):
+        """Clause feedback of the CoTM rule (CoTMReadout.train_step) on the ternary votes; weights are not changed.
+
+        skip_zero=False: a zero weight counts as positive, as in CoTMReadout. skip_zero=True (fb='cotm0', addendum A3
+        of experiments/PROTOCOL_rev1.md): a clause and class pair with a zero ternary weight receives no feedback."""
         B, n = c.shape
         T = self.T
         v = np.clip(v, -T, T)
@@ -231,6 +234,11 @@ class GGReadout:
         d_q = (T + v[ar, q]) / (2 * T)
         sel_y = (self.rng.random((B, n)) <= d_y[:, None]).astype(np.float32)
         sel_q = (self.rng.random((B, n)) <= d_q[:, None]).astype(np.float32)
+        if skip_zero:
+            pos_y, pos_q, neg_y, neg_q = Wt[y] > 0, Wt[q] > 0, Wt[y] < 0, Wt[q] < 0
+            SI = np.clip(sel_y * pos_y + sel_q * neg_q, 0, 1)
+            SII = np.clip(sel_y * neg_y + sel_q * pos_q, 0, 1)
+            return SI, SII * (1 - SI)
         pos_y, pos_q = (Wt[y] >= 0), (Wt[q] >= 0)
         SI = np.clip(sel_y * pos_y + sel_q * (~pos_q), 0, 1)
         SII = np.clip(sel_y * (~pos_y) + sel_q * pos_q, 0, 1)

@@ -36,6 +36,28 @@ at the s and learning rate selected in part A (TUNE, seed 1). The setting with t
 part-A and part-A2 settings is run with seeds 1 to 3 (FINAL). The paper reports this setting and states the part-A
 result. Code: `rev1.py` phases `abl2_tune` and `abl2_final`.
 
+## Addendum A3 (19 Nov 2026, written after all part A to G results and before the runs below; round-2 referee, R1)
+
+The round-2 referee noted two properties of `fb_cotm` that may favour GG feedback. (i) The CoTM rule takes the
+feedback type from the sign of the weight and treats a zero weight as positive. About half of the GG-TL ternary votes
+are zero, whereas the CoTM weights are almost never zero, so for these clause and class pairs the feedback type of
+`fb_cotm` carries no sign information. (ii) The selected s of `fb_cotm` lies at the lower grid edge (1.5) in most
+cells, and the grid was not extended to s = 1.
+
+* `fb_cotm0` (`--fb cotm0`, `GGReadout.cotm_feedback(skip_zero=True)`): the CoTM rule as in `fb_cotm`, except that a
+  clause and class pair with a zero ternary weight receives no feedback (Type I for a positive weight of the target
+  class or a negative weight of the sampled negative class, Type II for the opposite signs, nothing for a zero weight).
+  lr and Tm are those of the `fb_cotm` setting selected over parts A and A2. s is tuned over {1, 1.5, 2, 5, 10, 20}
+  (TUNE, seed 1, validation macro F1). The selected setting is run with seeds 1 to 3 (FINAL).
+* `fb_cotm` at s = 1, with the lr and Tm of its setting selected over parts A and A2 (TUNE, seed 1). The setting with
+  the best validation macro F1 over parts A, A2 and this run is run with seeds 1 to 3 (FINAL). Where the selection does
+  not change, the existing final runs are reused.
+* Both anchors (200, 1000), all six datasets. Code: `rev1.py` phases `abl3_tune` and `abl3_final`.
+* The paper reports both variants against GG-TL and against our CoTM, with the share of the GG-TL to CoTM difference
+  that each variant removes, whichever way the results go. If `fb_cotm0` or the updated `fb_cotm` removes clearly less
+  of the difference than the part-A2 variant, the claim that the feedback rule accounts for most of the difference is
+  revised accordingly.
+
 ## B. Clause dumps (reviewer M6)
 
 GG-TL, GG-TH and CoTM at the anchors 200 and 1000, six datasets, seed 1, FINAL, with the include masks and readout

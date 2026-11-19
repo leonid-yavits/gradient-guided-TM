@@ -134,7 +134,7 @@ def parser():
                     help='early stopping and best epoch on validation macro F1 (f1) or, for gg_lin, on the validation '
                          'macro F1 of the post-hoc rounded readout (f1_round)')
     ap.add_argument('--resume', action='store_true', help='checkpoint every epoch to <out>.ckpt and resume from it')
-    ap.add_argument('--fb', default='gg', choices=['gg', 'cotm'],
+    ap.add_argument('--fb', default='gg', choices=['gg', 'cotm', 'cotm0'],
                     help='clause feedback of gg_lintern: GG (default) or the CoTM rule on the ternary votes with margin --T')
     ap.add_argument('--no_pfac', action='store_true', help='ablation: drop the factor (1 - p_y) of GG feedback')
     ap.add_argument('--no_mag', action='store_true', help='ablation: replace min(1, |g|/mean|g|) of GG feedback by 1')
