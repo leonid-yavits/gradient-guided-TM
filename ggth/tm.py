@@ -3,6 +3,8 @@
 Readouts
   cotm       : Coalesced TM update (Glimsdal and Granmo, arXiv:2108.07594), integer weights.
   gg_lin     : gradient-guided (GG) TA feedback with a real-valued linear readout trained by Adam.
+  gg_lintern : GG feedback with a ternary linear readout (weights in {-1,0,+1}, straight-through
+               estimator, learned scale). Each clause votes directly for the classes.
   gg_hidtern : GG feedback with a ternary hidden layer (ternary weights and activations)
                and a ternary output layer. This is the GG-TH model of the paper.
 
@@ -118,14 +120,24 @@ class CoTMReadout:
 class GGReadout:
     """Differentiable readout trained by Adam. Its clause gradients drive GG feedback."""
 
-    def __init__(self, kind, n, m, rng, H=256, lr=2e-3):
-        assert kind in ('gg_lin', 'gg_hidtern'), kind
+    def __init__(self, kind, n, m, rng, H=256, lr=2e-3, fb='gg', T=None, no_pfac=False, no_mag=False, no_bias=False):
+        assert kind in ('gg_lin', 'gg_lintern', 'gg_hidtern'), kind
+        assert fb == 'gg' or kind == 'gg_lintern', 'CoTM clause feedback is implemented for gg_lintern only'
         self.kind, self.n, self.m, self.H, self.rng = kind, n, m, H, rng
+        # Ablations (experiments/PROTOCOL_rev1.md): fb='cotm' replaces GG clause feedback by the CoTM rule applied to
+        # the ternary votes (margin T); no_pfac drops the factor (1 - p_y); no_mag replaces min(1, |g|/mean|g|) by 1;
+        # no_bias fixes the class offsets at 0.
+        self.fb, self.T, self.no_pfac, self.no_mag, self.no_bias = fb, T, no_pfac, no_mag, no_bias
         sc = 1.0 / np.sqrt(n)
         if kind == 'gg_lin':
             self.W = (rng.standard_normal((m, n)) * sc).astype(np.float32)
             self.b = np.zeros(m, np.float32)
             params = [self.W, self.b]
+        elif kind == 'gg_lintern':
+            self.W = (rng.standard_normal((m, n)) * sc).astype(np.float32)
+            self.b = np.zeros(m, np.float32)
+            self.a = np.array([4.0 / np.sqrt(n)], np.float32)       # logit scale
+            params = [self.W, self.b, self.a]
         else:
             self.W1 = (rng.standard_normal((H, n)) * sc).astype(np.float32)
             self.b1 = np.zeros(H, np.float32)
@@ -139,6 +151,10 @@ class GGReadout:
     def forward(self, c):
         if self.kind == 'gg_lin':
             return c @ self.W.T + self.b, None
+        if self.kind == 'gg_lintern':
+            Wt = ternarize(self.W)
+            v = c @ Wt.T                                            # integer signed votes
+            return self.a[0] * v + self.b, (Wt, v)
         W1t, W2t = ternarize(self.W1), ternarize(self.W2)
         pre = c @ W1t.T                                             # integer signed popcount
         a = self.a1[0] * pre + self.b1
@@ -148,6 +164,12 @@ class GGReadout:
 
     def scores(self, c):
         return self.forward(c)[0]
+
+    def scores_rounded(self, c):
+        """gg_lin only: post-hoc ternary rounding of the trained weights, W ~ alpha * ternarize(W)."""
+        Wt = ternarize(self.W)
+        alpha = np.abs(self.W[Wt != 0]).mean() if np.any(Wt) else 1.0
+        return alpha * (c @ Wt.T) + self.b
 
     def train_step(self, c, y):
         B = c.shape[0]
@@ -161,6 +183,16 @@ class GGReadout:
             gb = dz.sum(0)
             dc = dz @ self.W
             self.opt.step([gW, gb])
+        elif self.kind == 'gg_lintern':
+            Wt, v = cache
+            gW = self.a[0] * (dz.T @ c)                             # straight-through to latent W
+            gb = dz.sum(0)
+            ga = np.array([np.sum(dz * v)], np.float32)
+            dc = self.a[0] * (dz @ Wt)
+            if self.no_bias:
+                gb = np.zeros_like(gb)
+            self.opt.step([gW, gb, ga])
+            self.a[0] = max(self.a[0], 1e-4)
         else:
             W1t, W2t, pre, a, h = cache
             hw = h @ W2t.T
@@ -176,17 +208,44 @@ class GGReadout:
             self.opt.step([gW1, gb1, gW2, gb2, ga1, ga2])
             self.a1[0] = max(self.a1[0], 1e-4)
             self.a2[0] = max(self.a2[0], 1e-4)
+        if self.fb in ('cotm', 'cotm0'):
+            return self.cotm_feedback(c, y, cache[0], cache[1], skip_zero=self.fb == 'cotm0')
         # GG feedback: g = d log p_y / dc = -B * dc
         g = -dc * B
-        d = 1.0 - p[np.arange(B), y]
+        d = np.ones(B, np.float32) if self.no_pfac else 1.0 - p[np.arange(B), y]
         mag = np.abs(g)
         norm = mag.mean(1, keepdims=True) + 1e-12
-        prob = d[:, None] * np.minimum(1.0, mag / norm)
+        prob = d[:, None] * (1.0 if self.no_mag else np.minimum(1.0, mag / norm))
         sel = (self.rng.random(prob.shape, dtype=np.float32) <= prob).astype(np.float32)
         return sel * (g > 0), sel * (g < 0)
 
 
-def make_readout(kind, n, m, rng, T=None, H=256, lr=2e-3):
+    def cotm_feedback(self, c, y, Wt, v, skip_zero=False):
+        """Clause feedback of the CoTM rule (CoTMReadout.train_step) on the ternary votes; weights are not changed.
+
+        skip_zero=False: a zero weight counts as positive, as in CoTMReadout. skip_zero=True (fb='cotm0', addendum A3
+        of experiments/PROTOCOL_rev1.md): a clause and class pair with a zero ternary weight receives no feedback."""
+        B, n = c.shape
+        T = self.T
+        v = np.clip(v, -T, T)
+        q = (y + self.rng.integers(1, self.m, size=B)) % self.m
+        ar = np.arange(B)
+        d_y = (T - v[ar, y]) / (2 * T)
+        d_q = (T + v[ar, q]) / (2 * T)
+        sel_y = (self.rng.random((B, n)) <= d_y[:, None]).astype(np.float32)
+        sel_q = (self.rng.random((B, n)) <= d_q[:, None]).astype(np.float32)
+        if skip_zero:
+            pos_y, pos_q, neg_y, neg_q = Wt[y] > 0, Wt[q] > 0, Wt[y] < 0, Wt[q] < 0
+            SI = np.clip(sel_y * pos_y + sel_q * neg_q, 0, 1)
+            SII = np.clip(sel_y * neg_y + sel_q * pos_q, 0, 1)
+            return SI, SII * (1 - SI)
+        pos_y, pos_q = (Wt[y] >= 0), (Wt[q] >= 0)
+        SI = np.clip(sel_y * pos_y + sel_q * (~pos_q), 0, 1)
+        SII = np.clip(sel_y * (~pos_y) + sel_q * pos_q, 0, 1)
+        return SI, SII * (1 - SI)
+
+
+def make_readout(kind, n, m, rng, T=None, H=256, lr=2e-3, **abl):
     if kind == 'cotm':
         return CoTMReadout(n, m, T if T is not None else 2.5 * n, rng)
-    return GGReadout(kind, n, m, rng, H=H, lr=lr)
+    return GGReadout(kind, n, m, rng, H=H, lr=lr, T=T, **abl)
